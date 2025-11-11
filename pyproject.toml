@@ -1,0 +1,76 @@
+[project]
+name = "django-clerk"
+version = "0.0.1"
+description = "Integrate Clerk with Django"
+readme = "README.md"
+requires-python = ">=3.12"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: Django",
+  "Framework :: Django :: 4.2",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+   "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "django>=4.2",
+]
+
+
+urls.Changelog = "https://github.com/jmitchel3/django-clerk"
+urls.Documentation = "https://github.com/jmitchel3/django-clerk"
+urls.Funding = "https://github.com/jmitchel3/django-clerk"
+urls.Repository = "https://github.com/jmitchel3/django-clerk"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.4.0",
+    "rav>=0.1.1",
+]
+
+[tool.black]
+line-length = 88
+target-version = [ 'py312' ]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+pythonpath = [ "src", "." ]
+testpaths = [ "tests" ]
+addopts = "--reuse-db"
+
+[tool.coverage.run]
+branch = true
+parallel = true
+source_pkgs = [ "django_googler" ]
+omit = [ "*/tests/*" ]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+[tool.tox]
+legacy_tox_ini = """
+[tox]
+env_list =
+    py312
+    py313
+    py314
+
+[testenv]
+package = wheel
+wheel_build_env = .pkg
+deps =
+    coverage[toml]>=7.6
+    pytest>=8.3
+    pytest-django>=4.9
+commands =
+    coverage run --parallel-mode -m pytest {posargs}
+    coverage combine
+    coverage report
+"""
+
