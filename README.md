@@ -1,3 +1,3 @@
-# Django Clerk
+# Django Clerk Users
 
 Integrate Clerk with Django, coming soon.

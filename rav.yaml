@@ -4,6 +4,8 @@ description: Rav is a shortcut to run commands on your local machine.
 scripts:
   install:
     - .venv/bin/python -m pip install -e .
+  hello:
+    - .venv/bin/python -c "import django_clerk_users; print(django_clerk_users.hello_world())"
   makemigrations:
     - cd example_project && ../.venv/bin/python manage.py makemigrations
   migrate:

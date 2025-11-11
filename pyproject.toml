@@ -1,5 +1,5 @@
 [project]
-name = "django-clerk"
+name = "django-clerk-users"
 version = "0.0.1"
 description = "Integrate Clerk with Django"
 readme = "README.md"
@@ -18,13 +18,14 @@ dependencies = [
 ]
 
 
-urls.Changelog = "https://github.com/jmitchel3/django-clerk"
-urls.Documentation = "https://github.com/jmitchel3/django-clerk"
-urls.Funding = "https://github.com/jmitchel3/django-clerk"
-urls.Repository = "https://github.com/jmitchel3/django-clerk"
+urls.Changelog = "https://github.com/jmitchel3/django-clerk-users"
+urls.Documentation = "https://github.com/jmitchel3/django-clerk-users"
+urls.Funding = "https://github.com/jmitchel3/django-clerk-users"
+urls.Repository = "https://github.com/jmitchel3/django-clerk-users"
 
 [dependency-groups]
 dev = [
+    "pip>=25.3",
     "pre-commit>=4.4.0",
     "rav>=0.1.1",
 ]
