@@ -1,12 +1,12 @@
 """
-Basic tests for django-googler package.
+Basic tests for django-clerk-users package.
 """
 
 import pytest  # noqa: F401
 
 
-def test_import_django_googler():
-    """Test that django_googler can be imported."""
+def test_import_django_clerk_users():
+    """Test that django_clerk_users can be imported."""
     import django_clerk_users  # noqa: F401
 
 
