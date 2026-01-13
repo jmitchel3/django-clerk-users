@@ -50,6 +50,19 @@ def __getattr__(name: str):
 
         return getattr(exceptions, name)
 
+    # Testing utilities
+    if name in (
+        "ClerkTestClient",
+        "ClerkTestMixin",
+        "TestUserData",
+        "make_test_email",
+        "make_test_phone",
+        "TEST_OTP_CODE",
+    ):
+        from django_clerk_users import testing
+
+        return getattr(testing, name)
+
     raise AttributeError(f"Module 'django_clerk_users' has no attribute '{name}'")
 
 
@@ -70,4 +83,11 @@ __all__ = [
     "ClerkAPIError",
     "ClerkUserNotFoundError",
     "ClerkOrganizationNotFoundError",
+    # Testing utilities
+    "ClerkTestClient",
+    "ClerkTestMixin",
+    "TestUserData",
+    "make_test_email",
+    "make_test_phone",
+    "TEST_OTP_CODE",
 ]

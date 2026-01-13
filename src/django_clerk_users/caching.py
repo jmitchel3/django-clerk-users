@@ -32,19 +32,43 @@ def get_org_cache_key(clerk_id: str) -> str:
     return f"{ORG_CACHE_PREFIX}{clerk_id}"
 
 
-def get_cached_user(clerk_id: str) -> "AbstractClerkUser | None | bool":
+def get_cached_user(clerk_id: str, query_db: bool = True) -> "AbstractClerkUser | None":
     """
-    Get a cached user by Clerk ID.
+    Get a user from cache or database.
 
     Args:
         clerk_id: The Clerk user ID.
+        query_db: If True, query database on cache miss and cache the result.
 
     Returns:
-        The cached user, None if not in cache, or False if user was not found
-        (to distinguish between "not cached" and "cached as not found").
+        The user instance, or None if not found.
     """
+    from django.contrib.auth import get_user_model
+
+    if not clerk_id:
+        return None
+
     cache_key = get_user_cache_key(clerk_id)
-    return cache.get(cache_key)
+    cached_user = cache.get(cache_key)
+
+    if cached_user is not None:
+        # Cache hit - could be a User instance or False (cached "not found")
+        return cached_user if cached_user is not False else None
+
+    if not query_db:
+        return None
+
+    # Cache miss - query database
+    User = get_user_model()
+    try:
+        user = User.objects.get(clerk_id=clerk_id, is_active=True)
+        # Cache the user instance
+        cache.set(cache_key, user, timeout=CLERK_CACHE_TIMEOUT)
+        return user
+    except User.DoesNotExist:
+        # Cache the "not found" result to prevent repeated DB queries
+        cache.set(cache_key, False, timeout=CLERK_CACHE_TIMEOUT)
+        return None
 
 
 def set_cached_user(clerk_id: str, user: "AbstractClerkUser | None") -> None:
@@ -73,18 +97,42 @@ def invalidate_clerk_user_cache(clerk_id: str) -> None:
     logger.debug(f"Invalidated user cache: {clerk_id}")
 
 
-def get_cached_organization(clerk_id: str):
+def get_cached_organization(clerk_id: str, query_db: bool = True):
     """
-    Get a cached organization by Clerk ID.
+    Get an organization from cache or database.
 
     Args:
         clerk_id: The Clerk organization ID.
+        query_db: If True, query database on cache miss and cache the result.
 
     Returns:
-        The cached organization, None if not in cache, or False if org was not found.
+        The organization instance, or None if not found.
     """
+    if not clerk_id:
+        return None
+
     cache_key = get_org_cache_key(clerk_id)
-    return cache.get(cache_key)
+    cached_org = cache.get(cache_key)
+
+    if cached_org is not None:
+        # Cache hit - could be an Organization instance or False (cached "not found")
+        return cached_org if cached_org is not False else None
+
+    if not query_db:
+        return None
+
+    # Cache miss - query database
+    try:
+        from django_clerk_users.organizations.models import Organization
+
+        org = Organization.objects.get(clerk_id=clerk_id, is_active=True)
+        # Cache the organization instance
+        cache.set(cache_key, org, timeout=CLERK_ORG_CACHE_TIMEOUT)
+        return org
+    except Exception:
+        # Cache the "not found" result to prevent repeated DB queries
+        cache.set(cache_key, False, timeout=CLERK_ORG_CACHE_TIMEOUT)
+        return None
 
 
 def set_cached_organization(clerk_id: str, organization) -> None:

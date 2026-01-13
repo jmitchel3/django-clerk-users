@@ -81,7 +81,7 @@ def get_clerk_payload_from_request(request: "HttpRequest") -> dict[str, Any] | N
             )
 
         # Validate the token using Clerk SDK
-        request_state = clerk.authenticate_request(request, auth_options=auth_options)
+        request_state = clerk.authenticate_request(request, options=auth_options)
 
         if not request_state.is_signed_in:
             logger.debug("Clerk token validation failed: not signed in")
@@ -93,13 +93,20 @@ def get_clerk_payload_from_request(request: "HttpRequest") -> dict[str, Any] | N
             return None
 
         # Calculate cache timeout based on token expiration
-        # Cache until 60 seconds before expiration, max 5 minutes
-        exp = payload.get("exp", 0)
-        now = int(time.time())
-        if exp > now:
-            ttl = min(exp - now - 60, CLERK_CACHE_TIMEOUT)
-            if ttl > 0:
-                cache.set(cache_key, payload, timeout=ttl)
+        # This ensures we never use an expired token from cache
+        exp = payload.get("exp")
+        if exp:
+            current_time = int(time.time())
+            # Cache until 1 minute before expiration, with a minimum of 60s
+            # and maximum of CLERK_CACHE_TIMEOUT (default 5 minutes)
+            time_until_exp = exp - current_time
+            cache_timeout = max(60, min(time_until_exp - 60, CLERK_CACHE_TIMEOUT))
+        else:
+            # Default to cache timeout if no exp claim
+            cache_timeout = CLERK_CACHE_TIMEOUT
+
+        cache.set(cache_key, payload, timeout=cache_timeout)
+        logger.debug(f"Cached Clerk payload for {cache_timeout} seconds")
 
         return payload
 

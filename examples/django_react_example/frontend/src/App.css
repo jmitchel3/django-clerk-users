@@ -1,0 +1,100 @@
+.app {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #333;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.auth-status {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.sign-in-btn,
+.sign-out-btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.sign-in-btn {
+  background: #646cff;
+  color: white;
+}
+
+.sign-out-btn {
+  background: #333;
+  color: white;
+}
+
+.api-tester {
+  text-align: left;
+}
+
+.api-tester h2 {
+  margin-bottom: 1.5rem;
+}
+
+.endpoint {
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background: #1a1a1a;
+  border-radius: 8px;
+}
+
+.endpoint h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.1rem;
+}
+
+.endpoint p {
+  margin: 0 0 1rem 0;
+  color: #888;
+}
+
+.endpoint code {
+  background: #333;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.endpoint button {
+  padding: 0.5rem 1rem;
+  background: #646cff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.endpoint button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.result {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #0d0d0d;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  text-align: left;
+}

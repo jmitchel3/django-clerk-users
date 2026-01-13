@@ -1,18 +1,50 @@
-description: Rav is a shortcut to run commands on your local machine.
-
-
+name: django-clerk-users
 scripts:
-  install:
-    - .venv/bin/python -m pip install -e .
-  hello:
-    - .venv/bin/python -c "import django_clerk_users; print(django_clerk_users.hello_world())"
-  makemigrations:
-    - cd example_project && ../.venv/bin/python manage.py makemigrations
-  migrate:
-    - cd example_project && ../.venv/bin/python manage.py migrate
-  dev:
-    - cd example_project && ../.venv/bin/python manage.py runserver 8888
-  createsuperuser:
-    - cd example_project && ../.venv/bin/python manage.py createsuperuser
-  tests:
+  # Main package commands
+  test:
     - uv run python -m pytest
+  test:verbose:
+    - uv run python -m pytest -v
+  test:cov:
+    - uv run tox
+  lint:
+    - uv run pre-commit run --all-files
+
+  # Example project commands
+  examples:setup:
+    - rav run examples:backend:install
+    - rav run examples:frontend:install
+
+  examples:backend:
+    - cd examples/django_react_example/backend
+    - uv run python manage.py runserver
+
+  examples:backend:install:
+    - uv pip install django django-cors-headers python-dotenv
+    - uv pip install -e .
+
+  examples:backend:migrate:
+    - cd examples/django_react_example/backend
+    - uv run python manage.py migrate
+
+  examples:backend:shell:
+    - cd examples/django_react_example/backend
+    - uv run python manage.py shell
+
+  examples:frontend:
+    - cd examples/django_react_example/frontend
+    - source ~/.nvm/nvm.sh && nvm use && npm run dev
+
+  examples:frontend:install:
+    - cd examples/django_react_example/frontend
+    - source ~/.nvm/nvm.sh && nvm use && npm install
+
+  examples:frontend:build:
+    - cd examples/django_react_example/frontend
+    - source ~/.nvm/nvm.sh && nvm use && npm run build
+
+  examples:open:frontend:
+    - open http://localhost:5173
+
+  examples:open:backend:
+    - open http://localhost:8000

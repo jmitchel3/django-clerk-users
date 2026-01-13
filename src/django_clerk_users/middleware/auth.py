@@ -2,7 +2,8 @@
 Clerk authentication middleware.
 
 This middleware validates Clerk JWT tokens and creates Django sessions
-for authenticated users.
+for authenticated users. It uses manual session handling instead of
+Django's login() to avoid triggering signals that may conflict with Clerk.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Callable
 
-from django.contrib.auth import get_user_model, login
+from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 
 from django_clerk_users.authentication.utils import (
@@ -25,6 +26,9 @@ if TYPE_CHECKING:
     from django.http import HttpRequest, HttpResponse
 
 logger = logging.getLogger(__name__)
+
+# Authentication backend path
+CLERK_BACKEND = "django_clerk_users.authentication.ClerkBackend"
 
 
 class ClerkAuthMiddleware:
@@ -41,10 +45,15 @@ class ClerkAuthMiddleware:
     - request.clerk_user: Same as request.user (for explicit Clerk access)
     - request.clerk_payload: The decoded JWT payload (if authenticated)
     - request.org: The organization ID from the token (if present)
+
+    Note: This middleware manually sets session data instead of using Django's
+    login() function to avoid triggering signals that may conflict with Clerk's
+    authentication flow.
     """
 
     def __init__(self, get_response: Callable[["HttpRequest"], "HttpResponse"]):
         self.get_response = get_response
+        self.debug = getattr(settings, "DEBUG", False)
 
     def __call__(self, request: "HttpRequest") -> "HttpResponse":
         # Process authentication before the view
@@ -94,16 +103,23 @@ class ClerkAuthMiddleware:
             logger.warning(f"Failed to get/create user: {e}")
             self._set_anonymous(request)
             return
+        except Exception as e:
+            logger.error(f"ClerkAuthMiddleware error: {e}", exc_info=True)
+            if self.debug:
+                raise
+            self._set_anonymous(request)
+            return
 
         if not user.is_active:
             logger.debug(f"User {user.clerk_id} is inactive")
             self._set_anonymous(request)
             return
 
-        # Create Django session
+        # Create Django session (without calling login())
         self._create_session(request, user, payload)
 
         # Set request attributes
+        user.backend = CLERK_BACKEND
         request.user = user
         request.clerk_user = user  # type: ignore
         request.clerk_payload = payload  # type: ignore
@@ -138,10 +154,10 @@ class ClerkAuthMiddleware:
                     request.session["clerk_org_id"] = payload.get("org_id")
                     request.clerk_payload = payload  # type: ignore
                     return True
-                else:
-                    # No token or invalid - keep using session for now
-                    # (might be a same-origin request without token)
-                    return True
+
+                # Missing token or invalid payload - end the session
+                self._clear_session(request)
+                return False
             except ClerkTokenError:
                 # Token is invalid - invalidate session
                 self._clear_session(request)
@@ -149,18 +165,24 @@ class ClerkAuthMiddleware:
 
         return True
 
-    def _create_session(
-        self, request: "HttpRequest", user, payload: dict
-    ) -> None:
+    def _create_session(self, request: "HttpRequest", user, payload: dict) -> None:
         """
         Create a Django session for the authenticated user.
+
+        Note: We manually set session data instead of calling login() to avoid
+        triggering Django signals (like user_logged_in) that may conflict with
+        Clerk's authentication flow.
         """
-        # Log the user in (creates session)
-        login(request, user, backend="django_clerk_users.authentication.ClerkBackend")
+        # Manually set session auth data (what login() would do internally)
+        request.session["_auth_user_id"] = str(user.pk)
+        request.session["_auth_user_backend"] = CLERK_BACKEND
+        request.session["_auth_user_hash"] = ""
 
         # Store Clerk-specific session data
         request.session["last_clerk_check"] = int(time.time())
         request.session["clerk_org_id"] = payload.get("org_id")
+
+        logger.debug(f"Created session for user {user.email}")
 
     def _clear_session(self, request: "HttpRequest") -> None:
         """

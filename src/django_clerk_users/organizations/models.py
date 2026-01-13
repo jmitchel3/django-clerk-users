@@ -117,6 +117,35 @@ class Organization(models.Model):
         """Return the public UUID as a string for API responses."""
         return str(self.uid)
 
+    @property
+    def handle(self) -> str:
+        """Return the organization slug (alias for compatibility)."""
+        return self.slug
+
+    def get_member_count(self) -> int:
+        """Get current member count from cached members."""
+        return self.cached_members.count()
+
+    def sync_from_clerk(self) -> tuple[bool, str]:
+        """
+        Sync organization data from Clerk.
+
+        Returns:
+            Tuple of (success, message)
+        """
+        from django_clerk_users.utils import update_or_create_clerk_user
+
+        try:
+            from django_clerk_users.organizations.utils import (
+                update_or_create_organization,
+            )
+
+            org, created = update_or_create_organization(self.clerk_id)
+            action = "created" if created else "updated"
+            return True, f"Organization {action} successfully"
+        except Exception as e:
+            return False, str(e)
+
 
 class OrganizationMember(models.Model):
     """
@@ -138,7 +167,7 @@ class OrganizationMember(models.Model):
     organization = models.ForeignKey(
         Organization,
         on_delete=models.CASCADE,
-        related_name="members",
+        related_name="cached_members",
         help_text="The organization.",
     )
     user = models.ForeignKey(
@@ -193,7 +222,11 @@ class OrganizationMember(models.Model):
     @property
     def is_admin(self) -> bool:
         """Check if this member has admin role."""
-        return self.role in ("admin", "org:admin")
+        return self.role.lower() in ("admin", "org:admin", "owner")
+
+    def can_invite_members(self) -> bool:
+        """Check if this member can invite others to the organization."""
+        return self.is_admin
 
 
 class OrganizationInvitation(models.Model):

@@ -173,3 +173,13 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Playwright MCP cache
+.playwright-mcp/
+
+# Development notes
+issues.md
+
+# Test artifacts
+tests/ui_*.py
+tests/*.sqlite3

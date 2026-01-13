@@ -70,9 +70,33 @@ class ClerkOrganizationMiddleware:
         # Resolve to Organization model
         organization = self._get_organization(org_id)
         if organization:
+            if not self._is_member(request, organization):
+                logger.debug("User is not a member of org %s", org_id)
+                return
             request.organization = organization  # type: ignore
             # Update request.org in case it came from header
             request.org = org_id  # type: ignore
+
+    def _is_member(self, request: "HttpRequest", organization: "Organization") -> bool:
+        """
+        Check whether the current user belongs to the organization.
+
+        Args:
+            request: The current HTTP request.
+            organization: The organization to check.
+
+        Returns:
+            True if the user is authenticated and a member.
+        """
+        if not hasattr(request, "user") or not request.user.is_authenticated:
+            return False
+
+        from django_clerk_users.organizations.models import OrganizationMember
+
+        return OrganizationMember.objects.filter(
+            organization=organization,
+            user=request.user,
+        ).exists()
 
     def _get_organization(self, clerk_id: str) -> "Organization | None":
         """

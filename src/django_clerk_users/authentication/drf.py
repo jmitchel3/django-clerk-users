@@ -8,15 +8,12 @@ Install it with: pip install django-clerk-users[drf]
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-try:
-    from rest_framework import authentication, exceptions
-except ImportError as e:
-    raise ImportError(
-        "Django REST Framework is required for ClerkAuthentication. "
-        "Install it with: pip install django-clerk-users[drf]"
-    ) from e
+if TYPE_CHECKING:
+    from django.http import HttpRequest
+
+    from django_clerk_users.models import AbstractClerkUser
 
 from django_clerk_users.authentication.utils import (
     get_clerk_payload_from_request,
@@ -24,15 +21,26 @@ from django_clerk_users.authentication.utils import (
 )
 from django_clerk_users.exceptions import ClerkAuthenticationError, ClerkTokenError
 
-if TYPE_CHECKING:
-    from django.http import HttpRequest
-
-    from django_clerk_users.models import AbstractClerkUser
-
 logger = logging.getLogger(__name__)
 
+# Defer DRF import - check at class instantiation time
+_drf_available = False
+_drf_import_error: str | None = None
 
-class ClerkAuthentication(authentication.BaseAuthentication):
+try:
+    from rest_framework import authentication, exceptions
+
+    _drf_available = True
+    _BaseAuthentication: Any = authentication.BaseAuthentication
+except ImportError:
+    _drf_import_error = (
+        "Django REST Framework is required for ClerkAuthentication. "
+        "Install it with: pip install django-clerk-users[drf]"
+    )
+    _BaseAuthentication = object
+
+
+class ClerkAuthentication(_BaseAuthentication):
     """
     Django REST Framework authentication class for Clerk.
 
@@ -47,6 +55,11 @@ class ClerkAuthentication(authentication.BaseAuthentication):
             ],
         }
     """
+
+    def __init__(self) -> None:
+        if not _drf_available:
+            raise ImportError(_drf_import_error)
+        super().__init__()
 
     def authenticate(
         self, request: "HttpRequest"
