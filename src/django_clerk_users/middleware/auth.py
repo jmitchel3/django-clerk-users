@@ -70,18 +70,35 @@ class ClerkAuthMiddleware:
 
         Sets request.user, request.clerk_user, request.clerk_payload,
         and request.org based on the authentication result.
+
+        Supports hybrid authentication:
+        - If user is authenticated via Django session (e.g., admin login),
+          respects that authentication and skips Clerk JWT validation
+        - Otherwise, attempts Clerk JWT authentication
         """
         # Initialize attributes
         request.clerk_user = None  # type: ignore
         request.clerk_payload = None  # type: ignore
         request.org = None  # type: ignore
 
-        # Check if user is already authenticated via session
-        if self._is_session_valid(request):
-            # User is already authenticated, just set clerk attributes
-            request.clerk_user = request.user  # type: ignore
-            request.org = request.session.get("clerk_org_id")  # type: ignore
-            return
+        # Check if user is already authenticated via Django's standard auth
+        # (e.g., admin login with username/password)
+        if hasattr(request, "user") and request.user.is_authenticated:
+            # Check if this is a Clerk session or a traditional Django session
+            if self._is_clerk_session(request):
+                # This is a Clerk session, validate it
+                if self._is_session_valid(request):
+                    # Clerk session is still valid
+                    request.clerk_user = request.user  # type: ignore
+                    request.org = request.session.get("clerk_org_id")  # type: ignore
+                    return
+                # Clerk session expired, clear it and try JWT auth below
+                self._clear_session(request)
+            else:
+                # This is a traditional Django session (e.g., admin login)
+                # Don't interfere with it - just skip Clerk authentication
+                logger.debug("Using existing Django session (non-Clerk)")
+                return
 
         # Try to authenticate via JWT token
         try:
@@ -128,14 +145,26 @@ class ClerkAuthMiddleware:
         if created:
             logger.info(f"Created new user: {user.email} ({user.clerk_id})")
 
+    def _is_clerk_session(self, request: "HttpRequest") -> bool:
+        """
+        Check if the current session is a Clerk-authenticated session.
+
+        Returns True if this session was created by Clerk authentication,
+        False if it's a traditional Django session (e.g., admin login).
+        """
+        # Clerk sessions have the last_clerk_check timestamp
+        return "last_clerk_check" in request.session
+
     def _is_session_valid(self, request: "HttpRequest") -> bool:
         """
-        Check if the current session is valid and doesn't need revalidation.
+        Check if the current Clerk session is valid and doesn't need revalidation.
 
         Returns True if:
         1. User is authenticated in session
         2. The session hasn't expired
         3. The re-validation interval hasn't passed
+
+        Note: This method should only be called for Clerk sessions.
         """
         if not hasattr(request, "user") or not request.user.is_authenticated:
             return False

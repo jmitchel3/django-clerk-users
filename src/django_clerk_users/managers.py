@@ -21,29 +21,26 @@ class ClerkUserManager(BaseUserManager["AbstractClerkUser"]):
 
     def create_user(
         self,
-        clerk_id: str,
         email: str,
+        clerk_id: str | None = None,
         password: str | None = None,
         **extra_fields: Any,
     ) -> "AbstractClerkUser":
         """
-        Create and save a user with the given clerk_id and email.
+        Create and save a user with the given email and optional clerk_id.
 
         Args:
-            clerk_id: The Clerk user ID.
-            email: The user's email address.
-            password: Optional password (not used for Clerk auth, but required
-                     for Django admin compatibility).
+            email: The user's email address (required).
+            clerk_id: The Clerk user ID (optional for Django admin users).
+            password: Optional password (required for Django admin users).
             **extra_fields: Additional fields for the user model.
 
         Returns:
             The created user instance.
 
         Raises:
-            ValueError: If clerk_id or email is not provided.
+            ValueError: If email is not provided.
         """
-        if not clerk_id:
-            raise ValueError("The clerk_id must be set")
         if not email:
             raise ValueError("The email must be set")
 
@@ -62,18 +59,18 @@ class ClerkUserManager(BaseUserManager["AbstractClerkUser"]):
 
     def create_superuser(
         self,
-        clerk_id: str,
         email: str,
         password: str | None = None,
+        clerk_id: str | None = None,
         **extra_fields: Any,
     ) -> "AbstractClerkUser":
         """
-        Create and save a superuser with the given clerk_id and email.
+        Create and save a superuser with the given email.
 
         Args:
-            clerk_id: The Clerk user ID.
-            email: The user's email address.
-            password: Optional password.
+            email: The user's email address (required).
+            password: Password for the superuser (required for Django admin access).
+            clerk_id: The Clerk user ID (optional).
             **extra_fields: Additional fields for the user model.
 
         Returns:
@@ -88,7 +85,9 @@ class ClerkUserManager(BaseUserManager["AbstractClerkUser"]):
         if extra_fields.get("is_superuser") is not True:
             raise ValueError("Superuser must have is_superuser=True.")
 
-        return self.create_user(clerk_id, email, password, **extra_fields)
+        return self.create_user(
+            email=email, clerk_id=clerk_id, password=password, **extra_fields
+        )
 
     def get_by_clerk_id(self, clerk_id: str) -> "AbstractClerkUser | None":
         """

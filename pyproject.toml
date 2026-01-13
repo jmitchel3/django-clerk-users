@@ -1,6 +1,10 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "django-clerk-users"
-version = "0.0.2"
+version = "0.1.0"
 description = "Integrate Clerk with Django"
 readme = "README.md"
 requires-python = ">=3.12"

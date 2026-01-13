@@ -96,16 +96,18 @@ class TestClerkUserModel:
             )
 
     def test_create_user_without_clerk_id(self, db):
-        """Test that clerk_id is required."""
+        """Test that clerk_id is optional (for Django admin users)."""
         User = get_user_model()
-        with pytest.raises(ValueError, match="clerk_id must be set"):
-            User.objects.create_user(clerk_id="", email="test@example.com")
+        # Should not raise - clerk_id is optional now
+        user = User.objects.create_user(email="admin@example.com", password="testpass")
+        assert user.clerk_id is None
+        assert user.email == "admin@example.com"
 
     def test_create_user_without_email(self, db):
         """Test that email is required."""
         User = get_user_model()
         with pytest.raises(ValueError, match="email must be set"):
-            User.objects.create_user(clerk_id="user_test", email="")
+            User.objects.create_user(email="", clerk_id="user_test")
 
     def test_user_str(self, clerk_user):
         """Test user string representation."""
@@ -172,10 +174,11 @@ class TestClerkUserModel:
         assert ClerkUser.USERNAME_FIELD == "email"
 
     def test_required_fields(self):
-        """Test REQUIRED_FIELDS includes clerk_id."""
+        """Test REQUIRED_FIELDS is empty (clerk_id is optional for hybrid auth)."""
         from django_clerk_users.models import ClerkUser
 
-        assert "clerk_id" in ClerkUser.REQUIRED_FIELDS
+        # REQUIRED_FIELDS should be empty to support creating admin users via createsuperuser
+        assert ClerkUser.REQUIRED_FIELDS == []
 
 
 class TestClerkUserManager:

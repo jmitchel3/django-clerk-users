@@ -290,7 +290,7 @@ wheels = [
 [[package]]
 name = "django-clerk-users"
 version = "0.0.2"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "clerk-backend-api" },
     { name = "django" },

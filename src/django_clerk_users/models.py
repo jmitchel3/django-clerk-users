@@ -43,8 +43,14 @@ class AbstractClerkUser(AbstractBaseUser, PermissionsMixin):
         max_length=255,
         unique=True,
         db_index=True,
-        help_text="Unique identifier from Clerk.",
+        null=True,
+        blank=True,
+        help_text="Unique identifier from Clerk. Can be null for Django admin users.",
     )
+
+    # Password field for Django admin compatibility
+    # Inherited from AbstractBaseUser, but we make it explicit that it's optional
+    # for Clerk users (who authenticate via JWT) but required for admin users
 
     # Standard user fields
     email = models.EmailField(
@@ -104,7 +110,7 @@ class AbstractClerkUser(AbstractBaseUser, PermissionsMixin):
     objects = ClerkUserManager()
 
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["clerk_id"]
+    REQUIRED_FIELDS = []  # Changed to empty - clerk_id is optional for admin users
 
     class Meta:
         abstract = True

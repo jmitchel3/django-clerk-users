@@ -133,10 +133,8 @@ class Organization(models.Model):
         Returns:
             Tuple of (success, message)
         """
-        from django_clerk_users.utils import update_or_create_clerk_user
-
         try:
-            from django_clerk_users.organizations.utils import (
+            from django_clerk_users.organizations.webhooks import (
                 update_or_create_organization,
             )
 

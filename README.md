@@ -89,11 +89,29 @@ MIDDLEWARE = [
 
 ### 5. Add authentication backend
 
+**For Clerk-only authentication:**
+
 ```python
 AUTHENTICATION_BACKENDS = [
     "django_clerk_users.authentication.ClerkBackend",
 ]
 ```
+
+**For hybrid authentication (Clerk + Django admin):**
+
+If you want to support both Clerk authentication (JWT) and traditional Django admin login (username/password), use both backends:
+
+```python
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",  # For Django admin
+    "django_clerk_users.authentication.ClerkBackend",  # For Clerk JWT
+]
+```
+
+This allows:
+- Admin users to log in via Django admin with username/password
+- Frontend users to authenticate via Clerk JWT tokens
+- The middleware automatically detects which authentication method was used
 
 ### 6. Run migrations
 
@@ -115,6 +133,21 @@ urlpatterns = [
 ```
 
 Then configure your Clerk Dashboard to send webhooks to `https://your-app.com/webhooks/clerk/`.
+
+### 8. Create admin users (for hybrid authentication)
+
+If you're using hybrid authentication, create an admin user for Django admin access:
+
+```bash
+python manage.py createsuperuser
+```
+
+This creates a user with:
+- Username/password authentication (for Django admin)
+- No `clerk_id` (since they're not Clerk users)
+- Access to Django admin panel
+
+Note: Regular Clerk users are created automatically via webhooks when they sign up through your frontend.
 
 ## Usage
 
@@ -154,6 +187,55 @@ REST_FRAMEWORK = {
 }
 ```
 
+## Hybrid Authentication (Clerk + Django Admin)
+
+The package supports hybrid authentication, allowing you to use both Clerk (JWT-based) authentication for your frontend users and traditional Django admin authentication for internal staff.
+
+### How it works
+
+1. **Frontend users**: Authenticate via Clerk JWT tokens (handled by `ClerkAuthMiddleware`)
+2. **Admin users**: Authenticate via username/password (handled by Django's `ModelBackend`)
+3. The middleware automatically detects which authentication method was used and respects existing sessions
+
+### Configuration
+
+```python
+# settings.py
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",  # For Django admin
+    "django_clerk_users.authentication.ClerkBackend",  # For Clerk JWT
+]
+```
+
+### Creating admin users
+
+Admin users don't need a `clerk_id` (it's optional in hybrid mode):
+
+```bash
+python manage.py createsuperuser
+# Email: admin@example.com
+# Password: ********
+```
+
+This creates a user with:
+- Username/password authentication (no Clerk integration)
+- Access to Django admin panel at `/admin/`
+- Standard Django permissions (is_staff, is_superuser)
+
+### Session handling
+
+- **Django admin sessions**: Traditional session cookies (set by Django's auth system)
+- **Clerk sessions**: JWT validated once, then cached in session with `last_clerk_check` marker
+- The middleware checks for `last_clerk_check` to distinguish between the two types
+
+### Use cases
+
+This is particularly useful when:
+- Your admin panel is on a different domain than your frontend
+- You want internal staff to access Django admin without Clerk accounts
+- You need traditional Django auth features (permissions, groups, etc.)
+- You're migrating from Django auth to Clerk gradually
+
 ## Organizations (Optional)
 
 For Clerk organization support:
@@ -190,9 +272,11 @@ python manage.py sync_clerk_organizations
 | `CLERK_SECRET_KEY` | Yes | - | Your Clerk secret key |
 | `CLERK_WEBHOOK_SIGNING_KEY` | Yes* | - | Webhook signing secret (*required for webhooks) |
 | `CLERK_FRONTEND_HOSTS` | Yes | `[]` | Authorized frontend URLs |
-| `CLERK_SESSION_REVALIDATION_SECONDS` | No | `300` | JWT revalidation interval |
-| `CLERK_CACHE_TIMEOUT` | No | `300` | User cache timeout |
-| `CLERK_ORG_CACHE_TIMEOUT` | No | `900` | Organization cache timeout |
+| `CLERK_AUTH_PARTIES` | No | `[]` | Alias for `CLERK_FRONTEND_HOSTS` |
+| `CLERK_SESSION_REVALIDATION_SECONDS` | No | `300` | JWT revalidation interval (seconds) |
+| `CLERK_CACHE_TIMEOUT` | No | `300` | User cache timeout (seconds) |
+| `CLERK_ORG_CACHE_TIMEOUT` | No | `900` | Organization cache timeout (seconds) |
+| `CLERK_WEBHOOK_DEDUP_TIMEOUT` | No | `45` | Webhook deduplication cache timeout (seconds) |
 
 ## License
 
