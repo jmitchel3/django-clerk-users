@@ -1,22 +1,73 @@
+"""
+django-clerk-users: Integrate Clerk authentication with Django.
+"""
+
 from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("django-clerk-users")
 except PackageNotFoundError:
-    # Package is not installed
     __version__ = "unknown"
 
+# Re-export default app config
+default_app_config = "django_clerk_users.apps.DjangoClerkUsersConfig"
 
-def __getattr__(name):
+
+def __getattr__(name: str):
     """Lazy import to avoid loading Django models before apps are ready."""
-    if name == "hello_world":
-        from django_clerk_users.main import hello_world
+    # Models
+    if name == "AbstractClerkUser":
+        from django_clerk_users.models import AbstractClerkUser
 
-        return hello_world
-    raise AttributeError(f"Module 'django_clerk' has no attribute '{name}'")
+        return AbstractClerkUser
+    if name == "ClerkUser":
+        from django_clerk_users.models import ClerkUser
+
+        return ClerkUser
+    if name == "ClerkUserManager":
+        from django_clerk_users.models import ClerkUserManager
+
+        return ClerkUserManager
+
+    # Client
+    if name == "get_clerk_client":
+        from django_clerk_users.client import get_clerk_client
+
+        return get_clerk_client
+
+    # Exceptions
+    if name in (
+        "ClerkError",
+        "ClerkConfigurationError",
+        "ClerkAuthenticationError",
+        "ClerkTokenError",
+        "ClerkWebhookError",
+        "ClerkAPIError",
+        "ClerkUserNotFoundError",
+        "ClerkOrganizationNotFoundError",
+    ):
+        from django_clerk_users import exceptions
+
+        return getattr(exceptions, name)
+
+    raise AttributeError(f"Module 'django_clerk_users' has no attribute '{name}'")
 
 
 __all__ = [
     "__version__",
-    "hello_world",
+    # Models
+    "AbstractClerkUser",
+    "ClerkUser",
+    "ClerkUserManager",
+    # Client
+    "get_clerk_client",
+    # Exceptions
+    "ClerkError",
+    "ClerkConfigurationError",
+    "ClerkAuthenticationError",
+    "ClerkTokenError",
+    "ClerkWebhookError",
+    "ClerkAPIError",
+    "ClerkUserNotFoundError",
+    "ClerkOrganizationNotFoundError",
 ]

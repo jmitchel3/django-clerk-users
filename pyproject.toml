@@ -1,6 +1,6 @@
 [project]
 name = "django-clerk-users"
-version = "0.0.1"
+version = "0.0.2"
 description = "Integrate Clerk with Django"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -15,19 +15,26 @@ classifiers = [
 ]
 dependencies = [
     "django>=4.2",
+    "clerk-backend-api>=1.0.0",
+    "svix>=1.0.0",
 ]
 
+[project.optional-dependencies]
+drf = ["djangorestframework>=3.14"]
 
-urls.Changelog = "https://github.com/jmitchel3/django-clerk-users"
-urls.Documentation = "https://github.com/jmitchel3/django-clerk-users"
-urls.Funding = "https://github.com/jmitchel3/django-clerk-users"
-urls.Repository = "https://github.com/jmitchel3/django-clerk-users"
+
+[project.urls]
+Changelog = "https://github.com/jmitchel3/django-clerk-users"
+Documentation = "https://github.com/jmitchel3/django-clerk-users"
+Funding = "https://github.com/jmitchel3/django-clerk-users"
+Repository = "https://github.com/jmitchel3/django-clerk-users"
 
 [dependency-groups]
 dev = [
     "pip>=25.3",
     "pre-commit>=4.4.0",
     "pytest>=9.0.0",
+    "pytest-django>=4.9",
     "rav>=0.1.1",
     "tox>=4.32.0",
     "tox-uv>=1.29.0",
