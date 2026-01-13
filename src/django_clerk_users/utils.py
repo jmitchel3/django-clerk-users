@@ -28,7 +28,9 @@ def update_or_create_clerk_user(
     Update or create a Django user from Clerk data.
 
     Fetches user data from the Clerk API and creates or updates
-    the corresponding Django user.
+    the corresponding Django user. If a user with the same email
+    already exists (e.g., a superuser created via createsuperuser),
+    it will be linked to the Clerk ID rather than creating a duplicate.
 
     Args:
         clerk_user_id: The Clerk user ID.
@@ -70,17 +72,42 @@ def update_or_create_clerk_user(
 
         # Prepare user data
         user_data = {
-            "email": primary_email,
             "first_name": getattr(clerk_user, "first_name", "") or "",
             "last_name": getattr(clerk_user, "last_name", "") or "",
             "image_url": getattr(clerk_user, "image_url", "") or "",
         }
 
-        # Update or create the Django user
-        user, created = User.objects.update_or_create(
-            clerk_id=clerk_user_id,
-            defaults=user_data,
-        )
+        # First, try to find by clerk_id
+        user = User.objects.filter(clerk_id=clerk_user_id).first()
+        created = False
+
+        if user:
+            # Update existing Clerk-linked user
+            for key, value in user_data.items():
+                setattr(user, key, value)
+            user.email = primary_email
+            user.save()
+        else:
+            # No user with this clerk_id - check if email already exists
+            user = User.objects.filter(email__iexact=primary_email).first()
+
+            if user:
+                # Link existing Django user to Clerk
+                user.clerk_id = clerk_user_id
+                for key, value in user_data.items():
+                    setattr(user, key, value)
+                user.save()
+                logger.info(
+                    f"Linked existing user {user.email} to Clerk ID {clerk_user_id}"
+                )
+            else:
+                # Create new user
+                user = User.objects.create(
+                    clerk_id=clerk_user_id,
+                    email=primary_email,
+                    **user_data,
+                )
+                created = True
 
         # Update cache
         set_cached_user(clerk_user_id, user)
