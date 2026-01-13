@@ -8,7 +8,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.backends import BaseBackend
+from django.contrib.auth.backends import ModelBackend
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
@@ -18,72 +18,66 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ClerkBackend(BaseBackend):
+class ClerkBackend(ModelBackend):
     """
     Django authentication backend for Clerk.
 
-    This backend authenticates users by their Clerk ID rather than
-    username/password. It's designed to work with Clerk's JWT-based
-    authentication.
+    This backend extends Django's ModelBackend to add Clerk ID authentication
+    while preserving standard username/password authentication. This allows:
+
+    - Superusers to log into Django admin with email/password
+    - Clerk users to authenticate via JWT tokens (clerk_id)
+    - All standard Django permission checks to work as expected
 
     To use this backend, add it to AUTHENTICATION_BACKENDS in settings:
 
         AUTHENTICATION_BACKENDS = [
             'django_clerk_users.authentication.ClerkBackend',
         ]
+
+    This is the only backend you need - it handles both Clerk authentication
+    and standard Django authentication (for admin access, etc.).
     """
 
     def authenticate(
         self,
         request: "HttpRequest | None" = None,
-        clerk_id: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
         **kwargs: Any,
     ) -> "AbstractClerkUser | None":
         """
-        Authenticate a user by their Clerk ID.
+        Authenticate a user by Clerk ID or username/password.
+
+        If a clerk_id is provided in kwargs, authenticates via Clerk ID lookup.
+        Otherwise, falls back to Django's standard username/password
+        authentication (inherited from ModelBackend).
 
         Args:
             request: The current HTTP request (optional).
-            clerk_id: The Clerk user ID to authenticate.
-            **kwargs: Additional keyword arguments (ignored).
+            username: The username (email) for standard auth (optional).
+            password: The password for standard auth (optional).
+            **kwargs: Additional keyword arguments. If 'clerk_id' is present,
+                      Clerk authentication is used instead of password auth.
 
         Returns:
             The authenticated user or None if authentication fails.
         """
-        if not clerk_id:
-            return None
+        # If clerk_id is provided, authenticate via Clerk
+        clerk_id = kwargs.pop("clerk_id", None)
+        if clerk_id:
+            User = get_user_model()
 
-        User = get_user_model()
+            try:
+                user = User.objects.get(clerk_id=clerk_id)
+                if user.is_active:
+                    return user
+                logger.debug(f"User {clerk_id} is inactive")
+                return None
+            except User.DoesNotExist:
+                logger.debug(f"No user found with clerk_id: {clerk_id}")
+                return None
 
-        try:
-            user = User.objects.get(clerk_id=clerk_id)
-            if user.is_active:
-                return user
-            logger.debug(f"User {clerk_id} is inactive")
-            return None
-        except User.DoesNotExist:
-            logger.debug(f"No user found with clerk_id: {clerk_id}")
-            return None
-
-    def get_user(self, user_id: int) -> "AbstractClerkUser | None":
-        """
-        Get a user by their Django primary key.
-
-        This method is called by Django's authentication middleware
-        to restore the user from the session.
-
-        Args:
-            user_id: The user's primary key.
-
-        Returns:
-            The user instance or None if not found.
-        """
-        User = get_user_model()
-
-        try:
-            user = User.objects.get(pk=user_id)
-            if user.is_active:
-                return user
-            return None
-        except User.DoesNotExist:
-            return None
+        # Otherwise, fall back to standard Django authentication
+        # This enables superuser login via Django admin
+        return super().authenticate(request, username, password, **kwargs)
