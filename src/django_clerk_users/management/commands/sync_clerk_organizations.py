@@ -2,9 +2,10 @@
 Management command to sync organizations from Clerk to Django.
 """
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from django_clerk_users.client import get_clerk_client
+from django_clerk_users.exceptions import ClerkConfigurationError
 
 
 class Command(BaseCommand):
@@ -61,7 +62,13 @@ class Command(BaseCommand):
         sync_members = options["sync_members"]
         dry_run = options["dry_run"]
 
-        clerk = get_clerk_client()
+        try:
+            clerk = get_clerk_client()
+        except ClerkConfigurationError:
+            raise CommandError(
+                "CLERK_SECRET_KEY is not configured. "
+                "Set it in your Django settings to use Clerk sync commands."
+            )
 
         created_count = 0
         updated_count = 0

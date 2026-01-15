@@ -14,6 +14,7 @@ from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
 
 from django_clerk_users.client import get_clerk_client
+from django_clerk_users.exceptions import ClerkConfigurationError
 
 
 class Command(BaseCommand):
@@ -86,7 +87,13 @@ class Command(BaseCommand):
                 "You must specify --email, --all, or --created-before"
             )
 
-        clerk = get_clerk_client()
+        try:
+            clerk = get_clerk_client()
+        except ClerkConfigurationError:
+            raise CommandError(
+                "CLERK_SECRET_KEY is not configured. "
+                "Set it in your Django settings to use Clerk sync commands."
+            )
 
         # Build queryset
         queryset = SourceUser.objects.all()

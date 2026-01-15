@@ -13,7 +13,11 @@ from clerk_backend_api.security.types import AuthenticateRequestOptions
 from django.core.cache import cache
 
 from django_clerk_users.client import get_clerk_client
-from django_clerk_users.exceptions import ClerkAuthenticationError, ClerkTokenError
+from django_clerk_users.exceptions import (
+    ClerkAuthenticationError,
+    ClerkConfigurationError,
+    ClerkTokenError,
+)
 from django_clerk_users.settings import CLERK_AUTH_PARTIES, CLERK_CACHE_TIMEOUT
 
 if TYPE_CHECKING:
@@ -72,7 +76,11 @@ def get_clerk_payload_from_request(request: "HttpRequest") -> dict[str, Any] | N
 
     try:
         clerk = get_clerk_client()
+    except ClerkConfigurationError:
+        # Clerk is not configured, skip authentication silently
+        return None
 
+    try:
         # Build auth options with authorized parties
         auth_options = None
         if CLERK_AUTH_PARTIES:

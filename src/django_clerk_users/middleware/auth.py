@@ -20,7 +20,10 @@ from django_clerk_users.authentication.utils import (
     get_or_create_user_from_payload,
 )
 from django_clerk_users.exceptions import ClerkAuthenticationError, ClerkTokenError
-from django_clerk_users.settings import CLERK_SESSION_REVALIDATION_SECONDS
+from django_clerk_users.settings import (
+    CLERK_SECRET_KEY,
+    CLERK_SESSION_REVALIDATION_SECONDS,
+)
 
 if TYPE_CHECKING:
     from django.http import HttpRequest, HttpResponse
@@ -80,6 +83,10 @@ class ClerkAuthMiddleware:
         request.clerk_user = None  # type: ignore
         request.clerk_payload = None  # type: ignore
         request.org = None  # type: ignore
+
+        # Skip Clerk authentication if not configured
+        if not CLERK_SECRET_KEY:
+            return
 
         # Check if user is already authenticated via Django's standard auth
         # (e.g., admin login with username/password)
