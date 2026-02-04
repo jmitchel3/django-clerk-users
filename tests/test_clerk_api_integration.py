@@ -229,6 +229,56 @@ class TestClerkAPISessionToken:
         assert token.count(".") == 2
 
 
+class TestClerkAPIUsernameSync:
+    """Test syncing generated usernames back to Clerk."""
+
+    def test_generate_username_syncs_to_clerk(self, db, clerk_client, created_users):
+        """Test that generate_username_for_user syncs the username to Clerk."""
+        from django_clerk_users.client import get_clerk_client
+        from django_clerk_users.utils import generate_username_for_user, update_or_create_clerk_user
+
+        # 1. Create user in Clerk without a username
+        clerk_user = clerk_client.create_test_user()
+        created_users.append(clerk_user.id)
+
+        # 2. Sync to Django
+        django_user, _ = update_or_create_clerk_user(clerk_user.id)
+        assert django_user.username is None  # No username from Clerk
+
+        # 3. Generate username locally (should sync to Clerk)
+        generated_username = generate_username_for_user(django_user.pk)
+
+        assert generated_username is not None
+        assert generated_username.startswith("user_")
+
+        # 4. Verify username was synced to Clerk
+        clerk = get_clerk_client()
+        updated_clerk_user = clerk.users.get(user_id=clerk_user.id)
+        assert updated_clerk_user.username == generated_username
+
+    def test_generate_username_sync_disabled(self, db, clerk_client, created_users):
+        """Test that sync_to_clerk=False skips Clerk sync."""
+        from django_clerk_users.client import get_clerk_client
+        from django_clerk_users.utils import generate_username_for_user, update_or_create_clerk_user
+
+        # 1. Create user in Clerk without a username
+        clerk_user = clerk_client.create_test_user()
+        created_users.append(clerk_user.id)
+
+        # 2. Sync to Django
+        django_user, _ = update_or_create_clerk_user(clerk_user.id)
+
+        # 3. Generate username locally WITHOUT syncing to Clerk
+        generated_username = generate_username_for_user(django_user.pk, sync_to_clerk=False)
+
+        assert generated_username is not None
+
+        # 4. Verify username was NOT synced to Clerk
+        clerk = get_clerk_client()
+        clerk_user_after = clerk.users.get(user_id=clerk_user.id)
+        assert clerk_user_after.username is None
+
+
 class TestClerkAPIFullFlow:
     """Test complete authentication flows."""
 
