@@ -21,35 +21,42 @@ class ClerkUserManager(BaseUserManager["AbstractClerkUser"]):
 
     def create_user(
         self,
-        email: str,
+        email: str | None = None,
         clerk_id: str | None = None,
         password: str | None = None,
+        username: str | None = None,
         **extra_fields: Any,
-    ) -> "AbstractClerkUser":
+    ) -> AbstractClerkUser:
         """
-        Create and save a user with the given email and optional clerk_id.
+        Create and save a user with the given identifiers.
 
         Args:
-            email: The user's email address (required).
+            email: The user's email address (optional for Clerk users).
             clerk_id: The Clerk user ID (optional for Django admin users).
             password: Optional password (required for Django admin users).
+            username: The user's username from Clerk (optional).
             **extra_fields: Additional fields for the user model.
 
         Returns:
             The created user instance.
 
         Raises:
-            ValueError: If email is not provided.
+            ValueError: If email is not provided for admin users (no clerk_id).
         """
-        if not email:
-            raise ValueError("The email must be set")
+        # Admin users (no clerk_id) require email for Django admin login
+        if not clerk_id and not email:
+            raise ValueError("The email must be set for admin users")
 
-        email = self.normalize_email(email)
+        if email:
+            email = self.normalize_email(email)
+
         extra_fields.setdefault("is_active", True)
         extra_fields.setdefault("is_staff", False)
         extra_fields.setdefault("is_superuser", False)
 
-        user = self.model(clerk_id=clerk_id, email=email, **extra_fields)
+        user = self.model(
+            clerk_id=clerk_id, email=email, username=username, **extra_fields
+        )
         if password:
             user.set_password(password)
         else:
@@ -63,7 +70,7 @@ class ClerkUserManager(BaseUserManager["AbstractClerkUser"]):
         password: str | None = None,
         clerk_id: str | None = None,
         **extra_fields: Any,
-    ) -> "AbstractClerkUser":
+    ) -> AbstractClerkUser:
         """
         Create and save a superuser with the given email.
 
@@ -89,7 +96,7 @@ class ClerkUserManager(BaseUserManager["AbstractClerkUser"]):
             email=email, clerk_id=clerk_id, password=password, **extra_fields
         )
 
-    def get_by_clerk_id(self, clerk_id: str) -> "AbstractClerkUser | None":
+    def get_by_clerk_id(self, clerk_id: str) -> AbstractClerkUser | None:
         """
         Get a user by their Clerk ID.
 
@@ -104,7 +111,7 @@ class ClerkUserManager(BaseUserManager["AbstractClerkUser"]):
         except self.model.DoesNotExist:
             return None
 
-    def get_by_email(self, email: str) -> "AbstractClerkUser | None":
+    def get_by_email(self, email: str) -> AbstractClerkUser | None:
         """
         Get a user by their email address.
 
@@ -116,5 +123,20 @@ class ClerkUserManager(BaseUserManager["AbstractClerkUser"]):
         """
         try:
             return self.get(email=self.normalize_email(email))
+        except self.model.DoesNotExist:
+            return None
+
+    def get_by_username(self, username: str) -> AbstractClerkUser | None:
+        """
+        Get a user by their username.
+
+        Args:
+            username: The user's username.
+
+        Returns:
+            The user instance or None if not found.
+        """
+        try:
+            return self.get(username=username)
         except self.model.DoesNotExist:
             return None

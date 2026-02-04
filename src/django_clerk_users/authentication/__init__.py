@@ -16,7 +16,7 @@ __all__ = [
 
 # Conditionally export DRF authentication if available
 try:
-    from django_clerk_users.authentication.drf import ClerkAuthentication
+    from django_clerk_users.authentication.drf import ClerkAuthentication  # noqa: F401
 
     __all__.append("ClerkAuthentication")
 except ImportError:

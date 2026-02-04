@@ -2,8 +2,6 @@
 Basic tests for django-clerk-users package.
 """
 
-import pytest
-
 
 class TestPackageImports:
     """Test that package imports work correctly."""

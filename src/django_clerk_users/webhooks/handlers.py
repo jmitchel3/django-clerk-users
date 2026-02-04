@@ -88,7 +88,7 @@ def is_duplicate_webhook(event_type: str, instance_id: str) -> bool:
 
 
 @transaction.atomic
-def handle_user_created(data: dict[str, Any]) -> "AbstractClerkUser | None":
+def handle_user_created(data: dict[str, Any]) -> AbstractClerkUser | None:
     """
     Handle user.created webhook event.
 
@@ -115,7 +115,8 @@ def handle_user_created(data: dict[str, Any]) -> "AbstractClerkUser | None":
             clerk_data=data,
         )
 
-        logger.info(f"User created via webhook: {user.email}")
+        user_display = user.email or user.username or user.clerk_id
+        logger.info(f"User created via webhook: {user_display}")
         return user
 
     except Exception as e:
@@ -124,7 +125,7 @@ def handle_user_created(data: dict[str, Any]) -> "AbstractClerkUser | None":
 
 
 @transaction.atomic
-def handle_user_updated(data: dict[str, Any]) -> "AbstractClerkUser | None":
+def handle_user_updated(data: dict[str, Any]) -> AbstractClerkUser | None:
     """
     Handle user.updated webhook event.
 
@@ -155,7 +156,8 @@ def handle_user_updated(data: dict[str, Any]) -> "AbstractClerkUser | None":
             clerk_data=data,
         )
 
-        logger.info(f"User updated via webhook: {user.email}")
+        user_display = user.email or user.username or user.clerk_id
+        logger.info(f"User updated via webhook: {user_display}")
         return user
 
     except Exception as e:
@@ -164,7 +166,7 @@ def handle_user_updated(data: dict[str, Any]) -> "AbstractClerkUser | None":
 
 
 @transaction.atomic
-def handle_user_deleted(data: dict[str, Any]) -> "AbstractClerkUser | None":
+def handle_user_deleted(data: dict[str, Any]) -> AbstractClerkUser | None:
     """
     Handle user.deleted webhook event.
 
@@ -207,7 +209,8 @@ def handle_user_deleted(data: dict[str, Any]) -> "AbstractClerkUser | None":
             clerk_data=data,
         )
 
-        logger.info(f"User deleted via webhook: {user.email}")
+        user_display = user.email or user.username or user.clerk_id
+        logger.info(f"User deleted via webhook: {user_display}")
         return user
 
     except Exception as e:
@@ -331,7 +334,9 @@ def process_webhook_event(event_type: str, data: dict[str, Any]) -> bool:
             return False
 
     # Check if organizations app handles this event
-    if event_type.startswith(("organization", "organizationMembership", "organizationInvitation")):
+    if event_type.startswith(
+        ("organization", "organizationMembership", "organizationInvitation")
+    ):
         try:
             from django_clerk_users.organizations.webhooks import (
                 process_organization_event,

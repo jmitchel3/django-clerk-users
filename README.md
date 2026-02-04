@@ -63,11 +63,13 @@ Or extend the abstract model for custom fields:
 # myapp/models.py
 from django_clerk_users.models import AbstractClerkUser
 
+
 class CustomUser(AbstractClerkUser):
     company = models.CharField(max_length=255, blank=True)
 
     class Meta(AbstractClerkUser.Meta):
         swappable = "AUTH_USER_MODEL"
+
 
 # settings.py
 AUTH_USER_MODEL = "myapp.CustomUser"
@@ -169,6 +171,7 @@ def my_view(request):
 
 ```python
 from django_clerk_users.decorators import clerk_user_required
+
 
 @clerk_user_required
 def protected_view(request):

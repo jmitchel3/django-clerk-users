@@ -36,7 +36,7 @@ def clerk_user_required(view_func: Callable) -> Callable:
     """
 
     @functools.wraps(view_func)
-    def wrapper(request: "HttpRequest", *args, **kwargs) -> "HttpResponse":
+    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
         clerk_user = getattr(request, "clerk_user", None)
 
         if not clerk_user or not clerk_user.is_authenticated:
@@ -74,7 +74,7 @@ def clerk_org_required(view_func: Callable) -> Callable:
     """
 
     @functools.wraps(view_func)
-    def wrapper(request: "HttpRequest", *args, **kwargs) -> "HttpResponse":
+    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
         clerk_user = getattr(request, "clerk_user", None)
 
         if not clerk_user or not clerk_user.is_authenticated:
@@ -118,7 +118,7 @@ def clerk_staff_required(view_func: Callable) -> Callable:
     """
 
     @functools.wraps(view_func)
-    def wrapper(request: "HttpRequest", *args, **kwargs) -> "HttpResponse":
+    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
         clerk_user = getattr(request, "clerk_user", None)
 
         if not clerk_user or not clerk_user.is_authenticated:
@@ -161,7 +161,7 @@ def clerk_superuser_required(view_func: Callable) -> Callable:
     """
 
     @functools.wraps(view_func)
-    def wrapper(request: "HttpRequest", *args, **kwargs) -> "HttpResponse":
+    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
         clerk_user = getattr(request, "clerk_user", None)
 
         if not clerk_user or not clerk_user.is_authenticated:

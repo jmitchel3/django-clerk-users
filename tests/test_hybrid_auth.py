@@ -3,10 +3,9 @@ Tests for hybrid authentication (Clerk + Django admin).
 """
 
 import time
-from unittest.mock import patch
 
 import pytest
-from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.backends.db import SessionStore
 from django.http import HttpResponse

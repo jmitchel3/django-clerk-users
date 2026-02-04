@@ -12,6 +12,7 @@ from django_clerk_users.models import ClerkUser
 class ClerkUserAdmin(UserAdmin):
     list_display = [
         "email",
+        "username",
         "first_name",
         "last_name",
         "clerk_id",
@@ -19,11 +20,11 @@ class ClerkUserAdmin(UserAdmin):
         "is_active",
     ]
     list_filter = ["is_staff", "is_active", "created_at"]
-    search_fields = ["email", "first_name", "last_name", "clerk_id"]
+    search_fields = ["email", "username", "first_name", "last_name", "clerk_id"]
     ordering = ["-created_at"]
 
     fieldsets = (
-        (None, {"fields": ("email", "password")}),
+        (None, {"fields": ("email", "username", "password")}),
         ("Personal info", {"fields": ("first_name", "last_name", "image_url")}),
         ("Clerk", {"fields": ("clerk_id", "uid")}),
         (
@@ -57,6 +58,7 @@ class ClerkUserAdmin(UserAdmin):
     readonly_fields = [
         "uid",
         "clerk_id",
+        "username",
         "created_at",
         "updated_at",
         "last_login",

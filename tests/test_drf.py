@@ -2,7 +2,7 @@
 Tests for django-clerk-users DRF authentication.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -10,12 +10,15 @@ from django.test import RequestFactory
 
 # Check if DRF is available
 try:
-    import rest_framework
+    import rest_framework  # noqa: F401
+
     HAS_DRF = True
 except ImportError:
     HAS_DRF = False
 
-pytestmark = pytest.mark.skipif(not HAS_DRF, reason="Django REST Framework not installed")
+pytestmark = pytest.mark.skipif(
+    not HAS_DRF, reason="Django REST Framework not installed"
+)
 
 
 @pytest.fixture
@@ -104,7 +107,9 @@ class TestClerkAuthentication:
         assert user == clerk_user
         assert auth_payload == payload
 
-    def test_authenticate_attaches_payload_to_request(self, request_factory, clerk_user):
+    def test_authenticate_attaches_payload_to_request(
+        self, request_factory, clerk_user
+    ):
         """Test that authentication attaches payload to request."""
         from django_clerk_users.authentication.drf import ClerkAuthentication
 

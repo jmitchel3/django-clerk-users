@@ -54,11 +54,11 @@ class ClerkAuthMiddleware:
     authentication flow.
     """
 
-    def __init__(self, get_response: Callable[["HttpRequest"], "HttpResponse"]):
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
         self.debug = getattr(settings, "DEBUG", False)
 
-    def __call__(self, request: "HttpRequest") -> "HttpResponse":
+    def __call__(self, request: HttpRequest) -> HttpResponse:
         # Process authentication before the view
         self.process_request(request)
 
@@ -67,7 +67,7 @@ class ClerkAuthMiddleware:
 
         return response
 
-    def process_request(self, request: "HttpRequest") -> None:
+    def process_request(self, request: HttpRequest) -> None:
         """
         Process the request and authenticate the user.
 
@@ -152,7 +152,7 @@ class ClerkAuthMiddleware:
         if created:
             logger.info(f"Created new user: {user.email} ({user.clerk_id})")
 
-    def _is_clerk_session(self, request: "HttpRequest") -> bool:
+    def _is_clerk_session(self, request: HttpRequest) -> bool:
         """
         Check if the current session is a Clerk-authenticated session.
 
@@ -162,7 +162,7 @@ class ClerkAuthMiddleware:
         # Clerk sessions have the last_clerk_check timestamp
         return "last_clerk_check" in request.session
 
-    def _is_session_valid(self, request: "HttpRequest") -> bool:
+    def _is_session_valid(self, request: HttpRequest) -> bool:
         """
         Check if the current Clerk session is valid and doesn't need revalidation.
 
@@ -201,7 +201,7 @@ class ClerkAuthMiddleware:
 
         return True
 
-    def _create_session(self, request: "HttpRequest", user, payload: dict) -> None:
+    def _create_session(self, request: HttpRequest, user, payload: dict) -> None:
         """
         Create a Django session for the authenticated user.
 
@@ -220,13 +220,13 @@ class ClerkAuthMiddleware:
 
         logger.debug(f"Created session for user {user.email}")
 
-    def _clear_session(self, request: "HttpRequest") -> None:
+    def _clear_session(self, request: HttpRequest) -> None:
         """
         Clear the Django session.
         """
         request.session.flush()
 
-    def _set_anonymous(self, request: "HttpRequest") -> None:
+    def _set_anonymous(self, request: HttpRequest) -> None:
         """
         Set the request user to anonymous.
         """

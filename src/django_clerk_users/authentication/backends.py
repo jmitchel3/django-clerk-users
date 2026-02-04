@@ -41,11 +41,11 @@ class ClerkBackend(ModelBackend):
 
     def authenticate(
         self,
-        request: "HttpRequest | None" = None,
+        request: HttpRequest | None = None,
         username: str | None = None,
         password: str | None = None,
         **kwargs: Any,
-    ) -> "AbstractClerkUser | None":
+    ) -> AbstractClerkUser | None:
         """
         Authenticate a user by Clerk ID or username/password.
 

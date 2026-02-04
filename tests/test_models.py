@@ -6,7 +6,6 @@ import uuid
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 
 
 @pytest.fixture
@@ -103,15 +102,88 @@ class TestClerkUserModel:
         assert user.clerk_id is None
         assert user.email == "admin@example.com"
 
-    def test_create_user_without_email(self, db):
-        """Test that email is required."""
+    def test_create_user_without_email_and_clerk_id(self, db):
+        """Test that email is required for admin users (no clerk_id)."""
         User = get_user_model()
-        with pytest.raises(ValueError, match="email must be set"):
-            User.objects.create_user(email="", clerk_id="user_test")
+        with pytest.raises(ValueError, match="email must be set for admin users"):
+            User.objects.create_user(email=None, clerk_id=None)
+
+    def test_create_clerk_user_without_email(self, db):
+        """Test that Clerk users can be created without email."""
+        User = get_user_model()
+        user = User.objects.create_user(
+            clerk_id="user_no_email",
+            email=None,
+            username="testuser",
+        )
+        assert user.email is None
+        assert user.username == "testuser"
+        assert user.clerk_id == "user_no_email"
+
+    def test_create_clerk_user_with_username_only(self, db):
+        """Test creating a Clerk user with username but no email."""
+        User = get_user_model()
+        user = User.objects.create_user(
+            clerk_id="user_username_only",
+            username="usernameonly",
+        )
+        assert user.email is None
+        assert user.username == "usernameonly"
+        assert user.clerk_id == "user_username_only"
+
+    def test_create_clerk_user_with_clerk_id_only(self, db):
+        """Test creating a Clerk user with only clerk_id (no email, no username)."""
+        User = get_user_model()
+        user = User.objects.create_user(
+            clerk_id="user_clerk_id_only",
+            email=None,
+            username=None,
+        )
+        assert user.email is None
+        assert user.username is None
+        assert user.clerk_id == "user_clerk_id_only"
+
+    def test_create_clerk_user_with_both_email_and_username(self, db):
+        """Test creating a Clerk user with both email and username."""
+        User = get_user_model()
+        user = User.objects.create_user(
+            clerk_id="user_both",
+            email="both@example.com",
+            username="bothuser",
+        )
+        assert user.email == "both@example.com"
+        assert user.username == "bothuser"
+        assert user.clerk_id == "user_both"
 
     def test_user_str(self, clerk_user):
         """Test user string representation."""
         assert str(clerk_user) == "test@example.com"
+
+    def test_user_str_username_fallback(self, db):
+        """Test user string falls back to username when no email."""
+        User = get_user_model()
+        user = User.objects.create_user(
+            clerk_id="user_str_username",
+            username="myusername",
+        )
+        assert str(user) == "myusername"
+
+    def test_user_str_clerk_id_fallback(self, db):
+        """Test user string falls back to clerk_id when no email or username."""
+        User = get_user_model()
+        user = User.objects.create_user(
+            clerk_id="user_str_clerkid",
+        )
+        assert str(user) == "user_str_clerkid"
+
+    def test_user_str_uid_fallback(self, db):
+        """Test user string falls back to uid when no other identifiers."""
+        User = get_user_model()
+        # Create user directly bypassing manager to have null clerk_id
+        user = User(email=None, username=None, clerk_id=None)
+        user.set_unusable_password()
+        user.save()
+        assert str(user) == str(user.uid)
 
     def test_user_uid_is_uuid(self, clerk_user):
         """Test that uid is a valid UUID."""
@@ -150,6 +222,26 @@ class TestClerkUserModel:
             email="nofirst@example.com",
         )
         assert user.get_short_name() == "nofirst"
+
+    def test_get_short_name_username_fallback(self, db):
+        """Test get_short_name falls back to username when no first name."""
+        User = get_user_model()
+        user = User.objects.create_user(
+            clerk_id="user_short_username",
+            username="shortusername",
+        )
+        assert user.get_short_name() == "shortusername"
+
+    def test_get_short_name_uid_fallback(self, db):
+        """Test get_short_name falls back to uid prefix when no other identifiers."""
+        User = get_user_model()
+        user = User.objects.create_user(
+            clerk_id="user_short_uid",
+            email=None,
+            username=None,
+        )
+        expected = str(user.uid)[:8]
+        assert user.get_short_name() == expected
 
     def test_superuser_has_all_perms(self, superuser):
         """Test superuser has all permissions."""
@@ -215,6 +307,51 @@ class TestClerkUserManager:
         User = get_user_model()
         found = User.objects.get_by_email("nonexistent@example.com")
         assert found is None
+
+    def test_get_by_username(self, db):
+        """Test get_by_username method."""
+        User = get_user_model()
+        user = User.objects.create_user(
+            clerk_id="user_byusername",
+            username="findme",
+        )
+        found = User.objects.get_by_username("findme")
+        assert found == user
+
+    def test_get_by_username_not_found(self, db):
+        """Test get_by_username returns None for missing user."""
+        User = get_user_model()
+        found = User.objects.get_by_username("nonexistent")
+        assert found is None
+
+    def test_username_unique_constraint(self, db):
+        """Test that username must be unique (when not null)."""
+        User = get_user_model()
+        User.objects.create_user(
+            clerk_id="user_unique1",
+            username="uniqueuser",
+        )
+        with pytest.raises(Exception):  # IntegrityError
+            User.objects.create_user(
+                clerk_id="user_unique2",
+                username="uniqueuser",  # Duplicate
+            )
+
+    def test_multiple_null_usernames_allowed(self, db):
+        """Test that multiple users can have null username."""
+        User = get_user_model()
+        user1 = User.objects.create_user(
+            clerk_id="user_null1",
+            email="null1@example.com",
+            username=None,
+        )
+        user2 = User.objects.create_user(
+            clerk_id="user_null2",
+            email="null2@example.com",
+            username=None,
+        )
+        assert user1.username is None
+        assert user2.username is None
 
     def test_normalize_email(self, db):
         """Test email normalization on create."""

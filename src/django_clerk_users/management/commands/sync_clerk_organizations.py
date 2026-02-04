@@ -43,7 +43,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         # Check if organizations app is installed
         try:
-            from django_clerk_users.organizations.models import Organization
+            from django_clerk_users.organizations.models import (
+                Organization,  # noqa: F401
+            )
             from django_clerk_users.organizations.webhooks import (
                 update_or_create_organization,
             )
@@ -127,9 +129,7 @@ class Command(BaseCommand):
 
                 except Exception as e:
                     error_count += 1
-                    self.stderr.write(
-                        self.style.ERROR(f"  Failed to sync {name}: {e}")
-                    )
+                    self.stderr.write(self.style.ERROR(f"  Failed to sync {name}: {e}"))
 
             if not sync_all:
                 break
@@ -161,9 +161,7 @@ class Command(BaseCommand):
             )
             memberships = response.data if hasattr(response, "data") else response
         except Exception as e:
-            self.stderr.write(
-                self.style.WARNING(f"    Failed to fetch members: {e}")
-            )
+            self.stderr.write(self.style.WARNING(f"    Failed to fetch members: {e}"))
             return
 
         for membership in memberships or []:

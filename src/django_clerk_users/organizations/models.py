@@ -12,7 +12,7 @@ from django.db import models
 from django.utils import timezone
 
 if TYPE_CHECKING:
-    from django_clerk_users.models import AbstractClerkUser
+    pass
 
 
 class Organization(models.Model):

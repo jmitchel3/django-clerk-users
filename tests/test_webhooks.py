@@ -269,6 +269,182 @@ class TestHandleUserDeleted:
 
         assert result is None
 
+    def test_delete_username_only_user(self, db):
+        """Test deleting a username-only user."""
+        from django_clerk_users.webhooks.handlers import handle_user_deleted
+
+        User = get_user_model()
+        user = User.objects.create_user(
+            clerk_id="user_delete_username",
+            username="deleteuser",
+        )
+        assert user.email is None
+
+        data = {"id": "user_delete_username"}
+        result = handle_user_deleted(data)
+
+        user.refresh_from_db()
+        assert result == user
+        assert user.is_active is False
+
+
+class TestHandleUserCreatedWithUsername:
+    """Test user creation webhook handler with username support."""
+
+    def test_user_created_with_username_only(self, db):
+        """Test user.created webhook with username but no email."""
+        from django_clerk_users.webhooks.handlers import handle_user_created
+
+        mock_clerk_user = MagicMock()
+        mock_clerk_user.first_name = "Username"
+        mock_clerk_user.last_name = "Only"
+        mock_clerk_user.image_url = ""
+        mock_clerk_user.username = "usernameonly"
+        mock_clerk_user.email_addresses = []
+        mock_clerk_user.primary_email_address_id = None
+
+        mock_client = MagicMock()
+        mock_client.users.get.return_value = mock_clerk_user
+
+        with patch(
+            "django_clerk_users.utils.get_clerk_client",
+            return_value=mock_client,
+        ):
+            data = {"id": "user_webhook_username"}
+            result = handle_user_created(data)
+
+        assert result is not None
+        assert result.clerk_id == "user_webhook_username"
+        assert result.email is None
+        assert result.username == "usernameonly"
+
+    def test_user_created_with_both_email_and_username(self, db):
+        """Test user.created webhook with both email and username."""
+        from django_clerk_users.webhooks.handlers import handle_user_created
+
+        mock_clerk_user = MagicMock()
+        mock_clerk_user.first_name = "Both"
+        mock_clerk_user.last_name = "User"
+        mock_clerk_user.image_url = ""
+        mock_clerk_user.username = "bothuser"
+        mock_clerk_user.primary_email_address_id = "email_123"
+        email_obj = MagicMock()
+        email_obj.id = "email_123"
+        email_obj.email_address = "both@example.com"
+        mock_clerk_user.email_addresses = [email_obj]
+
+        mock_client = MagicMock()
+        mock_client.users.get.return_value = mock_clerk_user
+
+        with patch(
+            "django_clerk_users.utils.get_clerk_client",
+            return_value=mock_client,
+        ):
+            data = {"id": "user_webhook_both"}
+            result = handle_user_created(data)
+
+        assert result is not None
+        assert result.email == "both@example.com"
+        assert result.username == "bothuser"
+
+    def test_user_created_with_clerk_id_only(self, db):
+        """Test user.created webhook with only clerk_id (no email, no username)."""
+        from django_clerk_users.webhooks.handlers import handle_user_created
+
+        mock_clerk_user = MagicMock()
+        mock_clerk_user.first_name = ""
+        mock_clerk_user.last_name = ""
+        mock_clerk_user.image_url = ""
+        mock_clerk_user.username = None
+        mock_clerk_user.email_addresses = []
+        mock_clerk_user.primary_email_address_id = None
+
+        mock_client = MagicMock()
+        mock_client.users.get.return_value = mock_clerk_user
+
+        with patch(
+            "django_clerk_users.utils.get_clerk_client",
+            return_value=mock_client,
+        ):
+            data = {"id": "user_webhook_clerk_only"}
+            result = handle_user_created(data)
+
+        assert result is not None
+        assert result.clerk_id == "user_webhook_clerk_only"
+        assert result.email is None
+        assert result.username is None
+
+
+class TestHandleUserUpdatedWithUsername:
+    """Test user update webhook handler with username support."""
+
+    def test_user_updated_adds_username(self, db):
+        """Test user.updated webhook that adds username to existing user."""
+        from django_clerk_users.webhooks.handlers import handle_user_updated
+
+        User = get_user_model()
+        existing_user = User.objects.create_user(
+            clerk_id="user_update_add_username",
+            email="addusername@example.com",
+        )
+        assert existing_user.username is None
+
+        mock_clerk_user = MagicMock()
+        mock_clerk_user.first_name = "Updated"
+        mock_clerk_user.last_name = "User"
+        mock_clerk_user.image_url = ""
+        mock_clerk_user.username = "newusername"
+        mock_clerk_user.primary_email_address_id = "email_123"
+        email_obj = MagicMock()
+        email_obj.id = "email_123"
+        email_obj.email_address = "addusername@example.com"
+        mock_clerk_user.email_addresses = [email_obj]
+
+        mock_client = MagicMock()
+        mock_client.users.get.return_value = mock_clerk_user
+
+        with patch(
+            "django_clerk_users.utils.get_clerk_client",
+            return_value=mock_client,
+        ):
+            data = {"id": "user_update_add_username"}
+            result = handle_user_updated(data)
+
+        assert result is not None
+        assert result.username == "newusername"
+
+    def test_user_updated_changes_email_to_username(self, db):
+        """Test user.updated webhook where email is removed, username added."""
+        from django_clerk_users.webhooks.handlers import handle_user_updated
+
+        User = get_user_model()
+        User.objects.create_user(
+            clerk_id="user_email_to_username",
+            email="willchange@example.com",
+        )
+
+        mock_clerk_user = MagicMock()
+        mock_clerk_user.first_name = "Changed"
+        mock_clerk_user.last_name = "User"
+        mock_clerk_user.image_url = ""
+        mock_clerk_user.username = "nowusername"
+        mock_clerk_user.email_addresses = []
+        mock_clerk_user.primary_email_address_id = None
+
+        mock_client = MagicMock()
+        mock_client.users.get.return_value = mock_clerk_user
+
+        with patch(
+            "django_clerk_users.utils.get_clerk_client",
+            return_value=mock_client,
+        ):
+            data = {"id": "user_email_to_username"}
+            result = handle_user_updated(data)
+
+        assert result is not None
+        assert result.email is None
+        assert result.username == "nowusername"
+
 
 class TestHandleSessionCreated:
     """Test session creation webhook handler."""
@@ -334,7 +510,9 @@ class TestWebhookSecurity:
         from django_clerk_users.webhooks.security import verify_clerk_webhook
         from django_clerk_users.exceptions import ClerkWebhookError
 
-        with patch("django_clerk_users.webhooks.security.CLERK_WEBHOOK_SIGNING_KEY", None):
+        with patch(
+            "django_clerk_users.webhooks.security.CLERK_WEBHOOK_SIGNING_KEY", None
+        ):
             request = RequestFactory().post("/")
             with pytest.raises(ClerkWebhookError, match="not configured"):
                 verify_clerk_webhook(request)

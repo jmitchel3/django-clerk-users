@@ -44,19 +44,30 @@ def mock_clerk_client():
     return MagicMock()
 
 
-def make_mock_clerk_user(user_id, email, first_name="Test", last_name="User"):
+def make_mock_clerk_user(
+    user_id,
+    email=None,
+    first_name="Test",
+    last_name="User",
+    username=None,
+):
     """Create a mock Clerk user object."""
     mock_user = MagicMock()
     mock_user.id = user_id
     mock_user.first_name = first_name
     mock_user.last_name = last_name
     mock_user.image_url = "https://example.com/image.jpg"
-    mock_user.primary_email_address_id = "email_123"
+    mock_user.username = username
 
-    email_obj = MagicMock()
-    email_obj.id = "email_123"
-    email_obj.email_address = email
-    mock_user.email_addresses = [email_obj]
+    if email:
+        mock_user.primary_email_address_id = "email_123"
+        email_obj = MagicMock()
+        email_obj.id = "email_123"
+        email_obj.email_address = email
+        mock_user.email_addresses = [email_obj]
+    else:
+        mock_user.primary_email_address_id = None
+        mock_user.email_addresses = []
 
     return mock_user
 
@@ -68,9 +79,9 @@ class TestUpdateOrCreateClerkUser:
         """Test creating a new user from Clerk."""
         mock_clerk_user = make_mock_clerk_user(
             "user_new123",
-            "new@example.com",
-            "New",
-            "Person",
+            email="new@example.com",
+            first_name="New",
+            last_name="Person",
         )
         mock_clerk_client.users.get.return_value = mock_clerk_user
 
@@ -90,9 +101,9 @@ class TestUpdateOrCreateClerkUser:
         """Test updating an existing user from Clerk."""
         mock_clerk_user = make_mock_clerk_user(
             "user_util123",
-            "updated@example.com",
-            "Updated",
-            "Name",
+            email="updated@example.com",
+            first_name="Updated",
+            last_name="Name",
         )
         mock_clerk_client.users.get.return_value = mock_clerk_user
 
@@ -117,18 +128,64 @@ class TestUpdateOrCreateClerkUser:
             with pytest.raises(ClerkUserNotFoundError):
                 update_or_create_clerk_user("nonexistent")
 
-    def test_user_without_email(self, db, mock_clerk_client):
-        """Test handling user without email address."""
-        mock_user = MagicMock()
-        mock_user.email_addresses = []
-        mock_clerk_client.users.get.return_value = mock_user
+    def test_user_without_email_but_with_username(self, db, mock_clerk_client):
+        """Test creating user with username but no email."""
+        mock_clerk_user = make_mock_clerk_user(
+            "user_username_only",
+            email=None,
+            username="usernameonly",
+        )
+        mock_clerk_client.users.get.return_value = mock_clerk_user
 
         with patch(
             "django_clerk_users.utils.get_clerk_client",
             return_value=mock_clerk_client,
         ):
-            with pytest.raises(ClerkAPIError, match="no email"):
-                update_or_create_clerk_user("user_no_email")
+            user, created = update_or_create_clerk_user("user_username_only")
+
+        assert created is True
+        assert user.clerk_id == "user_username_only"
+        assert user.email is None
+        assert user.username == "usernameonly"
+
+    def test_user_with_clerk_id_only(self, db, mock_clerk_client):
+        """Test creating user with only clerk_id (no email, no username)."""
+        mock_clerk_user = make_mock_clerk_user(
+            "user_clerk_id_only",
+            email=None,
+            username=None,
+        )
+        mock_clerk_client.users.get.return_value = mock_clerk_user
+
+        with patch(
+            "django_clerk_users.utils.get_clerk_client",
+            return_value=mock_clerk_client,
+        ):
+            user, created = update_or_create_clerk_user("user_clerk_id_only")
+
+        assert created is True
+        assert user.clerk_id == "user_clerk_id_only"
+        assert user.email is None
+        assert user.username is None
+
+    def test_user_with_both_email_and_username(self, db, mock_clerk_client):
+        """Test creating user with both email and username."""
+        mock_clerk_user = make_mock_clerk_user(
+            "user_both",
+            email="both@example.com",
+            username="bothuser",
+        )
+        mock_clerk_client.users.get.return_value = mock_clerk_user
+
+        with patch(
+            "django_clerk_users.utils.get_clerk_client",
+            return_value=mock_clerk_client,
+        ):
+            user, created = update_or_create_clerk_user("user_both")
+
+        assert created is True
+        assert user.email == "both@example.com"
+        assert user.username == "bothuser"
 
     def test_api_error(self, db, mock_clerk_client):
         """Test handling Clerk API errors."""
@@ -148,6 +205,7 @@ class TestUpdateOrCreateClerkUser:
         mock_user.last_name = "User"
         mock_user.image_url = ""
         mock_user.primary_email_address_id = None
+        mock_user.username = None
 
         email_obj = MagicMock()
         email_obj.id = "email_456"
@@ -163,6 +221,110 @@ class TestUpdateOrCreateClerkUser:
             user, created = update_or_create_clerk_user("user_fallback")
 
         assert user.email == "fallback@example.com"
+
+    def test_link_existing_user_by_email(self, db, mock_clerk_client):
+        """Test linking existing Django user to Clerk by email."""
+        User = get_user_model()
+        existing_user = User.objects.create_user(
+            email="existing@example.com",
+            password="testpass",
+        )
+        assert existing_user.clerk_id is None
+
+        mock_clerk_user = make_mock_clerk_user(
+            "user_link_email",
+            email="existing@example.com",
+        )
+        mock_clerk_client.users.get.return_value = mock_clerk_user
+
+        with patch(
+            "django_clerk_users.utils.get_clerk_client",
+            return_value=mock_clerk_client,
+        ):
+            user, created = update_or_create_clerk_user("user_link_email")
+
+        assert created is False
+        assert user.pk == existing_user.pk
+        assert user.clerk_id == "user_link_email"
+
+    def test_link_existing_user_by_username(self, db, mock_clerk_client):
+        """Test linking existing Django user to Clerk by username."""
+        User = get_user_model()
+        # Create user with username but no clerk_id
+        existing_user = User(
+            email="linkbyusername@example.com",
+            username="existinguser",
+        )
+        existing_user.set_password("testpass")
+        existing_user.save()
+        assert existing_user.clerk_id is None
+
+        mock_clerk_user = make_mock_clerk_user(
+            "user_link_username",
+            email=None,
+            username="existinguser",
+        )
+        mock_clerk_client.users.get.return_value = mock_clerk_user
+
+        with patch(
+            "django_clerk_users.utils.get_clerk_client",
+            return_value=mock_clerk_client,
+        ):
+            user, created = update_or_create_clerk_user("user_link_username")
+
+        assert created is False
+        assert user.pk == existing_user.pk
+        assert user.clerk_id == "user_link_username"
+
+    def test_update_adds_username_to_email_only_user(self, db, mock_clerk_client):
+        """Test updating a user to add username."""
+        User = get_user_model()
+        existing_user = User.objects.create_user(
+            clerk_id="user_add_username",
+            email="addusername@example.com",
+        )
+        assert existing_user.username is None
+
+        mock_clerk_user = make_mock_clerk_user(
+            "user_add_username",
+            email="addusername@example.com",
+            username="newusername",
+        )
+        mock_clerk_client.users.get.return_value = mock_clerk_user
+
+        with patch(
+            "django_clerk_users.utils.get_clerk_client",
+            return_value=mock_clerk_client,
+        ):
+            user, created = update_or_create_clerk_user("user_add_username")
+
+        assert created is False
+        assert user.username == "newusername"
+
+    def test_update_adds_email_to_username_only_user(self, db, mock_clerk_client):
+        """Test updating a user to add email."""
+        User = get_user_model()
+        existing_user = User.objects.create_user(
+            clerk_id="user_add_email",
+            username="addemail",
+        )
+        assert existing_user.email is None
+
+        mock_clerk_user = make_mock_clerk_user(
+            "user_add_email",
+            email="newemail@example.com",
+            username="addemail",
+        )
+        mock_clerk_client.users.get.return_value = mock_clerk_user
+
+        with patch(
+            "django_clerk_users.utils.get_clerk_client",
+            return_value=mock_clerk_client,
+        ):
+            user, created = update_or_create_clerk_user("user_add_email")
+
+        assert created is False
+        assert user.email == "newemail@example.com"
 
 
 class TestGetClerkUser:
@@ -195,14 +357,14 @@ class TestSyncUserFromClerk:
 
     def test_sync_invalidates_cache(self, clerk_user, mock_clerk_client):
         """Test that sync invalidates cache before fetching."""
-        from django_clerk_users.caching import get_user_cache_key, set_cached_user
+        from django_clerk_users.caching import set_cached_user
 
         # Pre-populate cache
         set_cached_user("user_util123", clerk_user)
 
         mock_clerk_user = make_mock_clerk_user(
             "user_util123",
-            "synced@example.com",
+            email="synced@example.com",
         )
         mock_clerk_client.users.get.return_value = mock_clerk_user
 
@@ -213,6 +375,25 @@ class TestSyncUserFromClerk:
             user = sync_user_from_clerk("user_util123")
 
         assert user.email == "synced@example.com"
+
+    def test_sync_username_only_user(self, db, mock_clerk_client):
+        """Test syncing a username-only user."""
+        mock_clerk_user = make_mock_clerk_user(
+            "user_sync_username",
+            email=None,
+            username="syncusername",
+        )
+        mock_clerk_client.users.get.return_value = mock_clerk_user
+
+        with patch(
+            "django_clerk_users.utils.get_clerk_client",
+            return_value=mock_clerk_client,
+        ):
+            user = sync_user_from_clerk("user_sync_username")
+
+        assert user is not None
+        assert user.email is None
+        assert user.username == "syncusername"
 
     def test_sync_failure_returns_none(self, db, mock_clerk_client):
         """Test that sync failure returns None."""

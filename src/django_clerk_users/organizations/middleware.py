@@ -37,10 +37,10 @@ class ClerkOrganizationMiddleware:
     2. X-Organization-Id header (for explicit org switching)
     """
 
-    def __init__(self, get_response: Callable[["HttpRequest"], "HttpResponse"]):
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
 
-    def __call__(self, request: "HttpRequest") -> "HttpResponse":
+    def __call__(self, request: HttpRequest) -> HttpResponse:
         # Process organization before the view
         self.process_request(request)
 
@@ -49,7 +49,7 @@ class ClerkOrganizationMiddleware:
 
         return response
 
-    def process_request(self, request: "HttpRequest") -> None:
+    def process_request(self, request: HttpRequest) -> None:
         """
         Resolve the organization context.
 
@@ -77,7 +77,7 @@ class ClerkOrganizationMiddleware:
             # Update request.org in case it came from header
             request.org = org_id  # type: ignore
 
-    def _is_member(self, request: "HttpRequest", organization: "Organization") -> bool:
+    def _is_member(self, request: HttpRequest, organization: Organization) -> bool:
         """
         Check whether the current user belongs to the organization.
 
@@ -98,7 +98,7 @@ class ClerkOrganizationMiddleware:
             user=request.user,
         ).exists()
 
-    def _get_organization(self, clerk_id: str) -> "Organization | None":
+    def _get_organization(self, clerk_id: str) -> Organization | None:
         """
         Get an Organization by Clerk ID, using cache.
 

@@ -3,7 +3,7 @@ Tests for django-clerk-users middleware.
 """
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -108,7 +108,9 @@ class TestMiddlewareTokenValidation:
         assert isinstance(request.user, AnonymousUser)
         assert request.clerk_user is None
 
-    def test_valid_token_authenticates_user(self, middleware, request_factory, clerk_user):
+    def test_valid_token_authenticates_user(
+        self, middleware, request_factory, clerk_user
+    ):
         """Test that valid token authenticates user."""
         request = make_request_with_session(request_factory)
         payload = {"sub": "user_mid123", "org_id": "org_test"}
@@ -152,7 +154,9 @@ class TestMiddlewareSessionHandling:
             "_auth_user_backend", ""
         )
 
-    def test_valid_session_skips_token_validation(self, middleware, request_factory, clerk_user):
+    def test_valid_session_skips_token_validation(
+        self, middleware, request_factory, clerk_user
+    ):
         """Test that valid session skips token validation."""
         request = make_request_with_session(request_factory)
 
@@ -173,7 +177,9 @@ class TestMiddlewareSessionHandling:
 class TestMiddlewareInactiveUser:
     """Test middleware with inactive users."""
 
-    def test_inactive_user_sets_anonymous(self, middleware, request_factory, inactive_user):
+    def test_inactive_user_sets_anonymous(
+        self, middleware, request_factory, inactive_user
+    ):
         """Test that inactive user is treated as anonymous."""
         request = make_request_with_session(request_factory)
         payload = {"sub": "user_inactive_mid"}
@@ -270,7 +276,9 @@ class TestMiddlewareErrorHandling:
 class TestMiddlewareRevalidation:
     """Test session revalidation."""
 
-    def test_revalidation_on_expired_check(self, middleware, request_factory, clerk_user):
+    def test_revalidation_on_expired_check(
+        self, middleware, request_factory, clerk_user
+    ):
         """Test that expired session triggers revalidation."""
         request = make_request_with_session(request_factory)
 

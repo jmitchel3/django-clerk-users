@@ -78,14 +78,12 @@ class Command(BaseCommand):
         migrate_all = options["all"]
         created_before = options["created_before"]
         skip_existing = options["skip_existing"]
-        skip_password_email = options["skip_password_email"]
+        _skip_password_email = options["skip_password_email"]  # noqa: F841
         dry_run = options["dry_run"]
         limit = options["limit"]
 
         if not email and not migrate_all and not created_before:
-            raise CommandError(
-                "You must specify --email, --all, or --created-before"
-            )
+            raise CommandError("You must specify --email, --all, or --created-before")
 
         try:
             clerk = get_clerk_client()
@@ -105,9 +103,7 @@ class Command(BaseCommand):
                 before_date = datetime.strptime(created_before, "%Y-%m-%d")
                 queryset = queryset.filter(date_joined__lt=before_date)
             except ValueError:
-                raise CommandError(
-                    "Invalid date format. Use YYYY-MM-DD"
-                )
+                raise CommandError("Invalid date format. Use YYYY-MM-DD")
 
         queryset = queryset[:limit]
 
@@ -141,14 +137,20 @@ class Command(BaseCommand):
             if skip_existing:
                 try:
                     existing_users = clerk.users.list(email_address=[user_email])
-                    users_data = existing_users.data if hasattr(existing_users, "data") else existing_users
+                    users_data = (
+                        existing_users.data
+                        if hasattr(existing_users, "data")
+                        else existing_users
+                    )
                     if users_data:
                         if dry_run:
                             self.stdout.write(
                                 f"  Would skip (exists in Clerk): {user_email}"
                             )
                         else:
-                            self.stdout.write(f"  Skipping (exists in Clerk): {user_email}")
+                            self.stdout.write(
+                                f"  Skipping (exists in Clerk): {user_email}"
+                            )
                             # Try to link the user
                             clerk_user = users_data[0]
                             self._link_user(source_user, clerk_user)
@@ -157,7 +159,9 @@ class Command(BaseCommand):
                         continue
                 except Exception as e:
                     self.stderr.write(
-                        self.style.WARNING(f"  Error checking if {user_email} exists: {e}")
+                        self.style.WARNING(
+                            f"  Error checking if {user_email} exists: {e}"
+                        )
                     )
 
             if dry_run:
@@ -178,15 +182,18 @@ class Command(BaseCommand):
                 self._link_user(source_user, clerk_user)
 
                 created_count += 1
-                self.stdout.write(
-                    self.style.SUCCESS(f"  Created: {user_email}")
-                )
+                self.stdout.write(self.style.SUCCESS(f"  Created: {user_email}"))
 
             except Exception as e:
                 error_str = str(e)
-                if "email_address" in error_str.lower() and "taken" in error_str.lower():
+                if (
+                    "email_address" in error_str.lower()
+                    and "taken" in error_str.lower()
+                ):
                     self.stdout.write(
-                        self.style.WARNING(f"  Email already exists in Clerk: {user_email}")
+                        self.style.WARNING(
+                            f"  Email already exists in Clerk: {user_email}"
+                        )
                     )
                     skipped_count += 1
                 else:
