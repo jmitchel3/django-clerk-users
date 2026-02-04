@@ -268,6 +268,61 @@ python manage.py sync_clerk_users
 python manage.py sync_clerk_organizations
 ```
 
+## Auto-Generated Usernames
+
+Clerk doesn't require usernames, but Django often does (for admin, URLs, etc.). This package provides options for generating usernames automatically.
+
+### Synchronous Generation
+
+Generate usernames inline during user creation:
+
+```python
+# settings.py
+CLERK_AUTO_GENERATE_USERNAME = True  # Enable auto-generation
+CLERK_AUTO_GENERATE_USERNAME_PREFIX = "user"  # Optional, default is "user"
+```
+
+Usernames are generated as `{prefix}_{uuid8}` (e.g., `user_abc12345`).
+
+### Async Generation (Celery, django-qstash, etc.)
+
+For high-traffic apps, you may want to defer username generation to a background task. Keep `CLERK_AUTO_GENERATE_USERNAME` disabled (the default) and use the `clerk_user_created` signal to trigger your async task:
+
+```python
+# myapp/signals.py
+from django.dispatch import receiver
+from django_clerk_users.webhooks.signals import clerk_user_created
+
+@receiver(clerk_user_created)
+def handle_user_created(sender, user, clerk_data, **kwargs):
+    from myapp.tasks import generate_username_task
+    generate_username_task.delay(user.pk)
+```
+
+```python
+# myapp/tasks.py (Celery example)
+from celery import shared_task
+from django_clerk_users.utils import generate_username_for_user
+
+@shared_task
+def generate_username_task(user_id: int):
+    return generate_username_for_user(user_id)
+```
+
+### Backfilling Existing Users
+
+To generate usernames for existing users without one:
+
+```python
+from django_clerk_users.utils import generate_usernames_for_users_without
+
+# Synchronous backfill
+count = generate_usernames_for_users_without()
+
+# With custom prefix
+count = generate_usernames_for_users_without(prefix="member")
+```
+
 ## Configuration Reference
 
 | Setting | Required | Default | Description |
@@ -280,6 +335,8 @@ python manage.py sync_clerk_organizations
 | `CLERK_CACHE_TIMEOUT` | No | `300` | User cache timeout (seconds) |
 | `CLERK_ORG_CACHE_TIMEOUT` | No | `900` | Organization cache timeout (seconds) |
 | `CLERK_WEBHOOK_DEDUP_TIMEOUT` | No | `45` | Webhook deduplication cache timeout (seconds) |
+| `CLERK_AUTO_GENERATE_USERNAME` | No | `False` | Auto-generate usernames synchronously |
+| `CLERK_AUTO_GENERATE_USERNAME_PREFIX` | No | `"user"` | Prefix for auto-generated usernames |
 
 ## License
 
