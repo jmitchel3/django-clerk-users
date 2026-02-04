@@ -5,7 +5,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "django-clerk-users"
-version = "0.2.3"
+version = "0.2.4"
 description = "Integrate Clerk with Django"
 readme = "README.md"
 requires-python = ">=3.12"
