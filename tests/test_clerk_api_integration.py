@@ -234,26 +234,42 @@ class TestClerkAPIUsernameSync:
 
     def test_generate_username_syncs_to_clerk(self, db, clerk_client, created_users):
         """Test that generate_username_for_user syncs the username to Clerk."""
+        from datetime import datetime
+
+        from clerk_backend_api.models import GetUserListRequest
+
         from django_clerk_users.client import get_clerk_client
         from django_clerk_users.utils import generate_username_for_user, update_or_create_clerk_user
 
-        # 1. Create user in Clerk without a username
-        clerk_user = clerk_client.create_test_user()
-        created_users.append(clerk_user.id)
+        clerk = get_clerk_client()
+        persistent_email = "testuser+clerk_test_auto_username@example.com"
+
+        # 1. Find or create the persistent test user
+        existing_users = clerk.users.list(
+            request=GetUserListRequest(email_address=[persistent_email])
+        )
+        if existing_users and len(existing_users) > 0:
+            clerk_user_id = existing_users[0].id
+        else:
+            # Create the persistent test user using test client (handles password requirement)
+            new_user = clerk_client.create_test_user(email=persistent_email)
+            clerk_user_id = new_user.id
+        # Don't add to created_users - this user persists across test runs
 
         # 2. Sync to Django
-        django_user, _ = update_or_create_clerk_user(clerk_user.id)
-        assert django_user.username is None  # No username from Clerk
+        django_user, _ = update_or_create_clerk_user(clerk_user_id)
 
-        # 3. Generate username locally (should sync to Clerk)
-        generated_username = generate_username_for_user(django_user.pk)
+        # 3. Generate username locally with timestamp prefix (should sync to Clerk)
+        timestamp = datetime.now().strftime("%Y%m%d%H%M")
+        generated_username = generate_username_for_user(
+            django_user.pk, prefix=f"user_abc_{timestamp}", force=True
+        )
 
         assert generated_username is not None
-        assert generated_username.startswith("user_")
+        assert generated_username.startswith(f"user_abc_{timestamp}")
 
         # 4. Verify username was synced to Clerk
-        clerk = get_clerk_client()
-        updated_clerk_user = clerk.users.get(user_id=clerk_user.id)
+        updated_clerk_user = clerk.users.get(user_id=clerk_user_id)
         assert updated_clerk_user.username == generated_username
 
     def test_generate_username_sync_disabled(self, db, clerk_client, created_users):
