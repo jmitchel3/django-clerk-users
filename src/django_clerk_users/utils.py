@@ -70,6 +70,13 @@ def update_or_create_clerk_user(
         # Extract username (optional in Clerk)
         username = getattr(clerk_user, "username", None)
 
+        # Auto-generate username if enabled and user doesn't have one
+        if username is None:
+            from django_clerk_users.settings import CLERK_AUTO_GENERATE_USERNAME
+
+            if CLERK_AUTO_GENERATE_USERNAME:
+                username = User.objects.generate_unique_username()
+
         # Note: Both email and username can be null - clerk_id is the only required identifier
 
         # Prepare user data
@@ -251,3 +258,118 @@ def update_user_metadata(
     except Exception as e:
         logger.error(f"Failed to update user metadata: {e}")
         return False
+
+
+def generate_username_for_user(
+    user_id: int | str,
+    prefix: str | None = None,
+    force: bool = False,
+) -> str | None:
+    """
+    Generate and set a username for a user who doesn't have one.
+
+    This function is designed to be called from async task queues like
+    Celery or django-qstash to generate usernames outside the request loop.
+
+    Args:
+        user_id: The Django user ID (pk) or Clerk user ID (clerk_id).
+        prefix: Optional username prefix. Uses CLERK_AUTO_GENERATE_USERNAME_PREFIX if not provided.
+        force: If True, regenerate username even if user already has one.
+
+    Returns:
+        The generated username, or None if user not found or already has username (and force=False).
+
+    Example usage with Celery:
+        @celery_app.task
+        def generate_username_task(user_id: int):
+            from django_clerk_users.utils import generate_username_for_user
+            return generate_username_for_user(user_id)
+
+    Example usage with django-qstash:
+        @stash.task()
+        def generate_username_task(user_id: int):
+            from django_clerk_users.utils import generate_username_for_user
+            return generate_username_for_user(user_id)
+    """
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+
+    # Find user by pk or clerk_id
+    user = None
+    if isinstance(user_id, int):
+        user = User.objects.filter(pk=user_id).first()
+    else:
+        # Try as clerk_id first, then as pk string
+        user = User.objects.filter(clerk_id=user_id).first()
+        if not user:
+            try:
+                user = User.objects.filter(pk=int(user_id)).first()
+            except (ValueError, TypeError):
+                pass
+
+    if not user:
+        logger.warning(f"User not found for username generation: {user_id}")
+        return None
+
+    if user.username and not force:
+        logger.debug(f"User {user_id} already has username: {user.username}")
+        return user.username
+
+    # Generate and save username
+    username = User.objects.generate_unique_username(prefix=prefix)
+    user.username = username
+    user.save(update_fields=["username"])
+
+    logger.info(f"Generated username '{username}' for user {user_id}")
+    return username
+
+
+def generate_usernames_for_users_without(
+    prefix: str | None = None,
+    batch_size: int = 100,
+) -> int:
+    """
+    Generate usernames for all users who don't have one.
+
+    This function is designed to be called from async task queues like
+    Celery or django-qstash to backfill usernames for existing users.
+
+    Args:
+        prefix: Optional username prefix. Uses CLERK_AUTO_GENERATE_USERNAME_PREFIX if not provided.
+        batch_size: Number of users to process per batch (default: 100).
+
+    Returns:
+        The number of users updated.
+
+    Example usage with Celery:
+        @celery_app.task
+        def backfill_usernames_task():
+            from django_clerk_users.utils import generate_usernames_for_users_without
+            return generate_usernames_for_users_without()
+
+    Example usage with django-qstash:
+        @stash.task()
+        def backfill_usernames_task():
+            from django_clerk_users.utils import generate_usernames_for_users_without
+            return generate_usernames_for_users_without()
+    """
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+
+    updated_count = 0
+    users_without_username = User.objects.filter(username__isnull=True).iterator(
+        chunk_size=batch_size
+    )
+
+    for user in users_without_username:
+        username = User.objects.generate_unique_username(prefix=prefix)
+        user.username = username
+        user.save(update_fields=["username"])
+        updated_count += 1
+
+    if updated_count > 0:
+        logger.info(f"Generated usernames for {updated_count} users")
+
+    return updated_count

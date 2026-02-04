@@ -63,6 +63,15 @@ def __getattr__(name: str):
 
         return getattr(testing, name)
 
+    # Username generation utilities (for Celery/django-qstash)
+    if name in (
+        "generate_username_for_user",
+        "generate_usernames_for_users_without",
+    ):
+        from django_clerk_users import utils
+
+        return getattr(utils, name)
+
     raise AttributeError(f"Module 'django_clerk_users' has no attribute '{name}'")
 
 
@@ -91,4 +100,7 @@ __all__ = [
     "make_test_phone",
     "make_test_username",
     "TEST_OTP_CODE",
+    # Username generation utilities
+    "generate_username_for_user",
+    "generate_usernames_for_users_without",
 ]

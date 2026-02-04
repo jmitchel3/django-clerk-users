@@ -33,3 +33,15 @@ CLERK_ORG_CACHE_TIMEOUT: int = getattr(settings, "CLERK_ORG_CACHE_TIMEOUT", 900)
 
 # Webhook deduplication cache timeout (default: 45 seconds)
 CLERK_WEBHOOK_DEDUP_TIMEOUT: int = getattr(settings, "CLERK_WEBHOOK_DEDUP_TIMEOUT", 45)
+
+# Auto-generate usernames for users without one (default: False)
+# When enabled, users created/updated without a username will get one auto-generated
+CLERK_AUTO_GENERATE_USERNAME: bool = getattr(
+    settings, "CLERK_AUTO_GENERATE_USERNAME", False
+)
+
+# Prefix for auto-generated usernames (default: "user")
+# Usernames will be generated as: {prefix}_{uuid8} (e.g., "user_abc12345")
+CLERK_AUTO_GENERATE_USERNAME_PREFIX: str = getattr(
+    settings, "CLERK_AUTO_GENERATE_USERNAME_PREFIX", "user"
+)

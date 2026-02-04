@@ -4,6 +4,7 @@ Custom managers for django-clerk-users models.
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from django.contrib.auth.models import BaseUserManager
@@ -140,3 +141,30 @@ class ClerkUserManager(BaseUserManager["AbstractClerkUser"]):
             return self.get(username=username)
         except self.model.DoesNotExist:
             return None
+
+    def generate_unique_username(self, prefix: str | None = None) -> str:
+        """
+        Generate a unique username that doesn't exist in the database.
+
+        Uses the pattern: {prefix}_{uuid8} (e.g., "user_abc12345")
+
+        Args:
+            prefix: The username prefix. If not provided, uses CLERK_AUTO_GENERATE_USERNAME_PREFIX.
+
+        Returns:
+            A unique username string.
+        """
+        from django_clerk_users.settings import CLERK_AUTO_GENERATE_USERNAME_PREFIX
+
+        if prefix is None:
+            prefix = CLERK_AUTO_GENERATE_USERNAME_PREFIX
+
+        # Try up to 10 times to generate a unique username
+        for _ in range(10):
+            unique_id = uuid.uuid4().hex[:8]
+            username = f"{prefix}_{unique_id}"
+            if not self.filter(username=username).exists():
+                return username
+
+        # Fallback: use full UUID to guarantee uniqueness
+        return f"{prefix}_{uuid.uuid4().hex}"
