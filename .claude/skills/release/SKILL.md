@@ -6,7 +6,7 @@ argument-hint: "[patch|minor|major|X.Y.Z]"
 
 # Release Skill
 
-Release a new version of this Copier template to GitHub.
+Release a new version of django-clerk-users to PyPI via GitHub Actions.
 
 ## Arguments (optional)
 
@@ -14,37 +14,48 @@ Release a new version of this Copier template to GitHub.
 
 ## Steps
 
-1. Get the current version from the latest git tag:
+1. Get the current version from `pyproject.toml`:
    ```bash
-   git describe --tags --abbrev=0
+   grep '^version = ' pyproject.toml
    ```
 
 2. Determine the new version:
-   - If no argument or `patch`: increment patch (0.2.4 -> 0.2.5)
-   - If `minor`: increment minor, reset patch (0.2.4 -> 0.3.0)
-   - If `major`: increment major, reset minor and patch (0.2.4 -> 1.0.0)
+   - If no argument or `patch`: increment patch (0.1.3 -> 0.1.4)
+   - If `minor`: increment minor, reset patch (0.1.3 -> 0.2.0)
+   - If `major`: increment major, reset minor and patch (0.1.3 -> 1.0.0)
    - If specific version provided (X.Y.Z format): use that version
 
 3. Confirm the version bump with the user using AskUserQuestion:
    - Show current version and new version
    - Ask for confirmation before proceeding
 
-4. Create a git tag: `v{version}`
+4. Update the version in `pyproject.toml`:
+   - Edit the `version = "X.Y.Z"` line to the new version
+
+5. Commit the version change:
    ```bash
-   git tag v{version}
+   git add pyproject.toml
+   git commit -m "Release vX.Y.Z"
    ```
 
-5. Push the tag to origin:
+6. Push to main:
    ```bash
-   git push origin v{version}
+   git push origin main
    ```
 
-6. Report success with the new version number and a link to the GitHub releases page.
+7. Create and push the git tag:
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+
+8. Report success with the new version number and a link to the GitHub releases page.
 
 ## Important
 
 - Do NOT include a co-authored-by line in commits
-- The version should be in format `X.Y.Z` (e.g., `0.2.5`)
-- Tags should be prefixed with `v` (e.g., `v0.2.5`)
-- This template uses git tags as the version source (no version file to update)
-- Ensure working directory is clean before tagging
+- The version should be in format `X.Y.Z` (e.g., `0.1.4`)
+- Tags should be prefixed with `v` (e.g., `v0.1.4`)
+- The version in `pyproject.toml` must match the tag (without the `v` prefix)
+- Ensure working directory is clean before starting (except for the version bump)
+- GitHub Actions will automatically run tests and publish to PyPI when the tag is pushed
