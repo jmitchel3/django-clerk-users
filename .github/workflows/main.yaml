@@ -1,13 +1,27 @@
 name: CI
 
 on:
-  # workflow_dispatch:
+  workflow_dispatch:
   push:
     branches:
     - main
     tags:
-    - '**'
+    - 'v*'
+    paths:
+    - 'src/**'
+    - 'tests/**'
+    - 'pyproject.toml'
+    - 'tox.ini'
+    - 'uv.lock'
+    - '.github/workflows/main.yaml'
   pull_request:
+    paths:
+    - 'src/**'
+    - 'tests/**'
+    - 'pyproject.toml'
+    - 'tox.ini'
+    - 'uv.lock'
+    - '.github/workflows/main.yaml'
 
 concurrency:
   group: ${{ github.head_ref || github.run_id }}
