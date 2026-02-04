@@ -3,9 +3,12 @@ Tests for django-clerk-users models.
 """
 
 import uuid
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
+
+User = get_user_model()
 
 
 @pytest.fixture
@@ -362,3 +365,57 @@ class TestClerkUserManager:
         )
         # Email domain should be lowercased
         assert "@example.com" in user.email.lower()
+
+
+class TestSetPassword:
+    """Tests for set_password with Clerk sync."""
+
+    @patch("django_clerk_users.client.get_clerk_client")
+    def test_set_password_syncs_to_clerk_by_default(self, mock_get_client, db):
+        """Test that set_password syncs to Clerk by default."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        user = User.objects.create(clerk_id="clerk_password_test", email="pw@test.com")
+        user.set_password("new_password123")
+
+        # Verify Clerk was called
+        mock_client.users.update.assert_called_once_with(
+            user_id="clerk_password_test", password="new_password123"
+        )
+
+    @patch("django_clerk_users.client.get_clerk_client")
+    def test_set_password_sync_disabled(self, mock_get_client, db):
+        """Test that sync_to_clerk=False skips Clerk sync."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        user = User.objects.create(clerk_id="clerk_no_sync_test", email="nosync@test.com")
+        user.set_password("new_password123", sync_to_clerk=False)
+
+        # Verify Clerk was NOT called
+        mock_client.users.update.assert_not_called()
+
+    def test_set_password_skips_clerk_for_user_without_clerk_id(self, db):
+        """Test that sync is skipped for users without a clerk_id."""
+        # User without clerk_id (like a Django admin user)
+        user = User.objects.create(clerk_id=None, email="admin@test.com")
+
+        # Should not raise - just skips Clerk sync
+        user.set_password("admin_password")
+
+        # Verify password was set in Django
+        assert user.check_password("admin_password")
+
+    @patch("django_clerk_users.client.get_clerk_client")
+    def test_set_password_handles_clerk_error(self, mock_get_client, db):
+        """Test that Clerk errors don't break password setting."""
+        mock_client = MagicMock()
+        mock_client.users.update.side_effect = Exception("Clerk API error")
+        mock_get_client.return_value = mock_client
+
+        user = User.objects.create(clerk_id="clerk_error_test", email="error@test.com")
+        user.set_password("new_password123")
+
+        # Password should still be set in Django despite Clerk error
+        assert user.check_password("new_password123")

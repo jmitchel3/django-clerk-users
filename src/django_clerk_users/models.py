@@ -4,6 +4,7 @@ User models for django-clerk-users.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -12,6 +13,8 @@ from django.db import models
 from django.utils import timezone
 
 from django_clerk_users.managers import ClerkUserManager
+
+logger = logging.getLogger(__name__)
 
 
 class AbstractClerkUser(AbstractBaseUser, PermissionsMixin):
@@ -181,6 +184,38 @@ class AbstractClerkUser(AbstractBaseUser, PermissionsMixin):
         if self.is_superuser:
             return True
         return super().has_module_perms(app_label)
+
+    def set_password(self, raw_password: str | None, sync_to_clerk: bool = True) -> None:
+        """
+        Set the user's password, optionally syncing to Clerk.
+
+        Args:
+            raw_password: The raw password to set.
+            sync_to_clerk: If True (default), sync the password to Clerk.
+                          Only applies if the user has a clerk_id.
+
+        Example:
+            # Sync password to both Django and Clerk (default)
+            user.set_password("new_password")
+            user.save()
+
+            # Only set Django password (skip Clerk sync)
+            user.set_password("new_password", sync_to_clerk=False)
+            user.save()
+        """
+        # Set password in Django
+        super().set_password(raw_password)
+
+        # Sync to Clerk if enabled and user has a clerk_id
+        if sync_to_clerk and self.clerk_id and raw_password:
+            try:
+                from django_clerk_users.client import get_clerk_client
+
+                clerk = get_clerk_client()
+                clerk.users.update(user_id=self.clerk_id, password=raw_password)
+                logger.info(f"Synced password to Clerk for user {self.clerk_id}")
+            except Exception as e:
+                logger.error(f"Failed to sync password to Clerk for user {self.clerk_id}: {e}")
 
 
 class ClerkUser(AbstractClerkUser):
