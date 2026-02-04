@@ -9,7 +9,10 @@ from typing import TYPE_CHECKING
 
 from django.http import HttpResponse, JsonResponse
 
-from django_clerk_users.webhooks.handlers import is_duplicate_webhook, process_webhook_event
+from django_clerk_users.webhooks.handlers import (
+    is_duplicate_webhook,
+    process_webhook_event,
+)
 from django_clerk_users.webhooks.security import clerk_webhook_required
 
 if TYPE_CHECKING:
@@ -19,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 @clerk_webhook_required
-def clerk_webhook_view(request: "HttpRequest") -> HttpResponse:
+def clerk_webhook_view(request: HttpRequest) -> HttpResponse:
     """
     Handle Clerk webhook events.
 

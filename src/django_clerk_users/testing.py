@@ -81,48 +81,77 @@ def make_test_phone(area_code: str = "201", suffix: int = 0) -> str:
     return f"+1{area_code}55501{suffix:02d}"
 
 
+def make_test_username(prefix: str = "testuser") -> str:
+    """
+    Generate a unique test username.
+
+    Args:
+        prefix: The username prefix (default: "testuser")
+
+    Returns:
+        A unique username like "testuser_abc12345"
+    """
+    unique_id = uuid.uuid4().hex[:8]
+    return f"{prefix}_{unique_id}"
+
+
 @dataclass
 class TestUserData:
     """Data returned when creating a test user."""
 
     id: str
     email: str | None
+    username: str | None
     first_name: str | None
     last_name: str | None
     phone_number: str | None
     raw_response: dict[str, Any]
 
     @classmethod
-    def from_clerk_response(cls, response: Any) -> "TestUserData":
+    def from_clerk_response(cls, response: Any) -> TestUserData:
         """Create TestUserData from a Clerk API response."""
         # Handle both dict and object responses
         if hasattr(response, "id"):
+            email_addresses = getattr(response, "email_addresses", None) or []
+            phone_numbers = getattr(response, "phone_numbers", None) or []
             return cls(
                 id=response.id,
-                email=getattr(response, "email_addresses", [{}])[0].get("email_address")
-                if getattr(response, "email_addresses", None)
-                else None,
+                email=(
+                    email_addresses[0].email_address
+                    if email_addresses and hasattr(email_addresses[0], "email_address")
+                    else (
+                        email_addresses[0].get("email_address")
+                        if email_addresses
+                        else None
+                    )
+                ),
+                username=getattr(response, "username", None),
                 first_name=getattr(response, "first_name", None),
                 last_name=getattr(response, "last_name", None),
-                phone_number=getattr(response, "phone_numbers", [{}])[0].get(
-                    "phone_number"
-                )
-                if getattr(response, "phone_numbers", None)
-                else None,
-                raw_response=response.__dict__
-                if hasattr(response, "__dict__")
-                else {},
+                phone_number=(
+                    phone_numbers[0].phone_number
+                    if phone_numbers and hasattr(phone_numbers[0], "phone_number")
+                    else (
+                        phone_numbers[0].get("phone_number") if phone_numbers else None
+                    )
+                ),
+                raw_response=response.__dict__ if hasattr(response, "__dict__") else {},
             )
         else:
             # Dict response
+            email_addresses = response.get("email_addresses") or []
+            phone_numbers = response.get("phone_numbers") or []
             return cls(
                 id=response.get("id", ""),
-                email=response.get("email_addresses", [{}])[0].get("email_address"),
+                email=(
+                    email_addresses[0].get("email_address") if email_addresses else None
+                ),
+                username=response.get("username"),
                 first_name=response.get("first_name"),
                 last_name=response.get("last_name"),
-                phone_number=response.get("phone_numbers", [{}])[0].get("phone_number")
-                if response.get("phone_numbers")
-                else None,
+                phone_number=(
+                    phone_numbers[0].get("phone_number") if phone_numbers else None
+                ),
                 raw_response=response,
             )
 
@@ -154,7 +183,7 @@ class ClerkTestClient:
         client.delete_user(user.id)
     """
 
-    def __init__(self, clerk_client: "Clerk | None" = None):
+    def __init__(self, clerk_client: Clerk | None = None):
         """
         Initialize the test client.
 
@@ -165,7 +194,7 @@ class ClerkTestClient:
         self._client = clerk_client
 
     @property
-    def client(self) -> "Clerk":
+    def client(self) -> Clerk:
         """Get the Clerk client, initializing if needed."""
         if self._client is None:
             self._client = get_clerk_client()
@@ -174,21 +203,25 @@ class ClerkTestClient:
     def create_test_user(
         self,
         email: str | None = None,
+        username: str | None = None,
         first_name: str = "Test",
         last_name: str = "User",
         password: str | None = None,
         phone_number: str | None = None,
+        skip_email: bool = False,
         **kwargs: Any,
     ) -> TestUserData:
         """
         Create a test user via Clerk's Backend API.
 
         Args:
-            email: Email address. If None, generates a test email.
+            email: Email address. If None and skip_email is False, generates a test email.
+            username: Username. If None and skip_email is True, generates a test username.
             first_name: User's first name (default: "Test")
             last_name: User's last name (default: "User")
             password: Optional password. If not provided, user is passwordless.
             phone_number: Optional phone number for SMS auth.
+            skip_email: If True, don't auto-generate email (for username-only users).
             **kwargs: Additional fields to pass to Clerk API.
 
         Returns:
@@ -203,19 +236,40 @@ class ClerkTestClient:
 
             # Create user with password for email/password auth
             user = client.create_test_user(password="testpass123")
-        """
-        if email is None:
-            email = make_test_email()
 
+            # Create username-only user (no email)
+            user = client.create_test_user(skip_email=True, username="testuser123")
+
+            # Create user with both email and username
+            user = client.create_test_user(username="testuser123")
+        """
         create_params: dict[str, Any] = {
-            "email_address": [email],
             "first_name": first_name,
             "last_name": last_name,
             **kwargs,
         }
 
+        # Handle email
+        if not skip_email:
+            if email is None:
+                email = make_test_email()
+            create_params["email_address"] = [email]
+        elif email is not None:
+            create_params["email_address"] = [email]
+
+        # Handle username
+        if username is not None:
+            create_params["username"] = username
+        elif skip_email and username is None:
+            # Username-only user needs a username
+            create_params["username"] = make_test_username()
+
+        # Handle password - provide a default for instances that require it
         if password:
             create_params["password"] = password
+        else:
+            # Use a default test password if the instance requires one
+            create_params["password"] = "ClerkTest123!"
 
         if phone_number:
             create_params["phone_number"] = [phone_number]
@@ -233,7 +287,7 @@ class ClerkTestClient:
         Returns:
             Session data including the session ID.
         """
-        response = self.client.sessions.create(user_id=user_id)
+        response = self.client.sessions.create(request={"user_id": user_id})
         if hasattr(response, "__dict__"):
             return {"id": response.id, "user_id": response.user_id}
         return response
@@ -267,7 +321,7 @@ class ClerkTestClient:
             session = self.create_session(user_id)
             session_id = session["id"]
 
-        response = self.client.sessions.create_session_token(session_id=session_id)
+        response = self.client.sessions.create_token(session_id=session_id)
 
         if hasattr(response, "jwt"):
             return response.jwt

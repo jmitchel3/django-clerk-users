@@ -2,9 +2,7 @@
 Tests for django_clerk_users.testing module.
 """
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 
 class TestTestingHelpers:
@@ -62,6 +60,28 @@ class TestTestingHelpers:
 
         assert TEST_OTP_CODE == "424242"
 
+    def test_make_test_username_default(self):
+        """Test generating a default test username."""
+        from django_clerk_users.testing import make_test_username
+
+        username = make_test_username()
+        assert username.startswith("testuser_")
+        assert len(username) == len("testuser_") + 8  # 8 char unique suffix
+
+    def test_make_test_username_custom_prefix(self):
+        """Test generating a test username with custom prefix."""
+        from django_clerk_users.testing import make_test_username
+
+        username = make_test_username(prefix="admin")
+        assert username.startswith("admin_")
+
+    def test_make_test_username_unique(self):
+        """Test that generated usernames are unique."""
+        from django_clerk_users.testing import make_test_username
+
+        usernames = [make_test_username() for _ in range(10)]
+        assert len(usernames) == len(set(usernames))
+
 
 class TestTestUserData:
     """Test TestUserData parsing."""
@@ -74,6 +94,7 @@ class TestTestUserData:
             "id": "user_123",
             "first_name": "Jane",
             "last_name": "Doe",
+            "username": "janedoe",
             "email_addresses": [{"email_address": "jane@example.com"}],
             "phone_numbers": [{"phone_number": "+15551234567"}],
         }
@@ -83,8 +104,29 @@ class TestTestUserData:
         assert user.id == "user_123"
         assert user.first_name == "Jane"
         assert user.last_name == "Doe"
+        assert user.username == "janedoe"
         assert user.email == "jane@example.com"
         assert user.phone_number == "+15551234567"
+
+    def test_from_dict_response_username_only(self):
+        """Test parsing from dict response with username but no email."""
+        from django_clerk_users.testing import TestUserData
+
+        response = {
+            "id": "user_789",
+            "first_name": "Test",
+            "last_name": "User",
+            "username": "usernameonly",
+            "email_addresses": [],
+            "phone_numbers": [],
+        }
+
+        user = TestUserData.from_clerk_response(response)
+
+        assert user.id == "user_789"
+        assert user.username == "usernameonly"
+        assert user.email is None
+        assert user.phone_number is None
 
     def test_from_object_response(self):
         """Test parsing from object response."""
@@ -94,6 +136,7 @@ class TestTestUserData:
         response.id = "user_456"
         response.first_name = "John"
         response.last_name = "Smith"
+        response.username = "johnsmith"
         response.email_addresses = [{"email_address": "john@example.com"}]
         response.phone_numbers = None
 
@@ -101,7 +144,27 @@ class TestTestUserData:
 
         assert user.id == "user_456"
         assert user.first_name == "John"
+        assert user.username == "johnsmith"
         assert user.email == "john@example.com"
+        assert user.phone_number is None
+
+    def test_from_object_response_username_only(self):
+        """Test parsing from object response with username but no email."""
+        from django_clerk_users.testing import TestUserData
+
+        response = MagicMock()
+        response.id = "user_abc"
+        response.first_name = "Test"
+        response.last_name = "User"
+        response.username = "testusername"
+        response.email_addresses = []
+        response.phone_numbers = []
+
+        user = TestUserData.from_clerk_response(response)
+
+        assert user.id == "user_abc"
+        assert user.username == "testusername"
+        assert user.email is None
         assert user.phone_number is None
 
 
@@ -120,6 +183,7 @@ class TestClerkTestClient:
         mock_user.id = "user_test123"
         mock_user.first_name = "Test"
         mock_user.last_name = "User"
+        mock_user.username = None
         mock_user.email_addresses = [{"email_address": "test+clerk_test@example.com"}]
         mock_user.phone_numbers = []
         mock_clerk.users.create.return_value = mock_user
@@ -129,6 +193,79 @@ class TestClerkTestClient:
         assert user.id == "user_test123"
         assert user.first_name == "Test"
         mock_clerk.users.create.assert_called_once()
+
+    def test_create_test_user_with_username(self):
+        """Test creating a test user with username."""
+        from django_clerk_users.testing import ClerkTestClient
+
+        mock_clerk = MagicMock()
+        client = ClerkTestClient(clerk_client=mock_clerk)
+
+        mock_user = MagicMock()
+        mock_user.id = "user_username123"
+        mock_user.first_name = "Test"
+        mock_user.last_name = "User"
+        mock_user.username = "testusername"
+        mock_user.email_addresses = [{"email_address": "test+clerk_test@example.com"}]
+        mock_user.phone_numbers = []
+        mock_clerk.users.create.return_value = mock_user
+
+        user = client.create_test_user(username="testusername")
+
+        assert user.id == "user_username123"
+        assert user.username == "testusername"
+        # Should be called with username parameter
+        call_kwargs = mock_clerk.users.create.call_args[1]
+        assert call_kwargs["username"] == "testusername"
+
+    def test_create_username_only_user(self):
+        """Test creating a username-only user (no email)."""
+        from django_clerk_users.testing import ClerkTestClient
+
+        mock_clerk = MagicMock()
+        client = ClerkTestClient(clerk_client=mock_clerk)
+
+        mock_user = MagicMock()
+        mock_user.id = "user_usernameonly"
+        mock_user.first_name = "Test"
+        mock_user.last_name = "User"
+        mock_user.username = "usernameonly"
+        mock_user.email_addresses = []
+        mock_user.phone_numbers = []
+        mock_clerk.users.create.return_value = mock_user
+
+        user = client.create_test_user(skip_email=True, username="usernameonly")
+
+        assert user.id == "user_usernameonly"
+        assert user.username == "usernameonly"
+        assert user.email is None
+        # Should NOT have email_address in call
+        call_kwargs = mock_clerk.users.create.call_args[1]
+        assert "email_address" not in call_kwargs
+        assert call_kwargs["username"] == "usernameonly"
+
+    def test_create_username_only_user_auto_username(self):
+        """Test creating a username-only user with auto-generated username."""
+        from django_clerk_users.testing import ClerkTestClient
+
+        mock_clerk = MagicMock()
+        client = ClerkTestClient(clerk_client=mock_clerk)
+
+        mock_user = MagicMock()
+        mock_user.id = "user_auto"
+        mock_user.first_name = "Test"
+        mock_user.last_name = "User"
+        mock_user.username = "testuser_abc12345"
+        mock_user.email_addresses = []
+        mock_user.phone_numbers = []
+        mock_clerk.users.create.return_value = mock_user
+
+        client.create_test_user(skip_email=True)
+
+        # Should have auto-generated a username
+        call_kwargs = mock_clerk.users.create.call_args[1]
+        assert "username" in call_kwargs
+        assert call_kwargs["username"].startswith("testuser_")
 
     def test_create_session(self):
         """Test creating a session."""
@@ -145,7 +282,9 @@ class TestClerkTestClient:
         session = client.create_session("user_test123")
 
         assert session["id"] == "sess_test123"
-        mock_clerk.sessions.create.assert_called_once_with(user_id="user_test123")
+        mock_clerk.sessions.create.assert_called_once_with(
+            request={"user_id": "user_test123"}
+        )
 
     def test_get_session_token(self):
         """Test getting a session token."""
@@ -163,7 +302,7 @@ class TestClerkTestClient:
         # Mock token creation
         mock_token = MagicMock()
         mock_token.jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
-        mock_clerk.sessions.create_session_token.return_value = mock_token
+        mock_clerk.sessions.create_token.return_value = mock_token
 
         token = client.get_session_token("user_test123")
 
@@ -214,6 +353,12 @@ class TestPackageExports:
         from django_clerk_users import make_test_phone
 
         assert callable(make_test_phone)
+
+    def test_import_make_test_username(self):
+        """Test importing make_test_username from main package."""
+        from django_clerk_users import make_test_username
+
+        assert callable(make_test_username)
 
     def test_import_test_otp_code(self):
         """Test importing TEST_OTP_CODE from main package."""

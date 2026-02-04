@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def update_or_create_clerk_user(
     clerk_user_id: str,
-) -> tuple["AbstractClerkUser", bool]:
+) -> tuple[AbstractClerkUser, bool]:
     """
     Update or create a Django user from Clerk data.
 
@@ -67,8 +67,10 @@ def update_or_create_clerk_user(
             # Fallback to first email
             primary_email = getattr(email_addresses[0], "email_address", None)
 
-        if not primary_email:
-            raise ClerkAPIError(f"User {clerk_user_id} has no email address")
+        # Extract username (optional in Clerk)
+        username = getattr(clerk_user, "username", None)
+
+        # Note: Both email and username can be null - clerk_id is the only required identifier
 
         # Prepare user data
         user_data = {
@@ -86,25 +88,39 @@ def update_or_create_clerk_user(
             for key, value in user_data.items():
                 setattr(user, key, value)
             user.email = primary_email
+            user.username = username
             user.save()
         else:
-            # No user with this clerk_id - check if email already exists
-            user = User.objects.filter(email__iexact=primary_email).first()
+            # No user with this clerk_id - try to find by email or username
+            existing_user = None
 
-            if user:
+            # Try email first (if present)
+            if primary_email:
+                existing_user = User.objects.filter(email__iexact=primary_email).first()
+
+            # Try username if no match by email (and username is present)
+            if not existing_user and username:
+                existing_user = User.objects.filter(username=username).first()
+
+            if existing_user:
                 # Link existing Django user to Clerk
-                user.clerk_id = clerk_user_id
+                existing_user.clerk_id = clerk_user_id
+                existing_user.email = primary_email
+                existing_user.username = username
                 for key, value in user_data.items():
-                    setattr(user, key, value)
-                user.save()
+                    setattr(existing_user, key, value)
+                existing_user.save()
+                user = existing_user
+                identifier = primary_email or username or clerk_user_id
                 logger.info(
-                    f"Linked existing user {user.email} to Clerk ID {clerk_user_id}"
+                    f"Linked existing user {identifier} to Clerk ID {clerk_user_id}"
                 )
             else:
                 # Create new user
                 user = User.objects.create(
                     clerk_id=clerk_user_id,
                     email=primary_email,
+                    username=username,
                     **user_data,
                 )
                 created = True
@@ -121,7 +137,7 @@ def update_or_create_clerk_user(
         raise ClerkAPIError(f"Failed to fetch user from Clerk: {e}") from e
 
 
-def get_clerk_user(clerk_user_id: str) -> "AbstractClerkUser | None":
+def get_clerk_user(clerk_user_id: str) -> AbstractClerkUser | None:
     """
     Get a Django user by their Clerk ID.
 
@@ -153,7 +169,7 @@ def get_clerk_user(clerk_user_id: str) -> "AbstractClerkUser | None":
     return user
 
 
-def sync_user_from_clerk(clerk_user_id: str) -> "AbstractClerkUser | None":
+def sync_user_from_clerk(clerk_user_id: str) -> AbstractClerkUser | None:
     """
     Force sync a user from Clerk, ignoring cache.
 

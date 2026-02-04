@@ -10,7 +10,6 @@ except PackageNotFoundError:
     __version__ = "unknown"
 
 # Re-export default app config
-default_app_config = "django_clerk_users.apps.DjangoClerkUsersConfig"
 
 
 def __getattr__(name: str):
@@ -57,6 +56,7 @@ def __getattr__(name: str):
         "TestUserData",
         "make_test_email",
         "make_test_phone",
+        "make_test_username",
         "TEST_OTP_CODE",
     ):
         from django_clerk_users import testing
@@ -89,5 +89,6 @@ __all__ = [
     "TestUserData",
     "make_test_email",
     "make_test_phone",
+    "make_test_username",
     "TEST_OTP_CODE",
 ]

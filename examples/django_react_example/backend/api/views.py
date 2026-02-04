@@ -15,16 +15,20 @@ def public_view(request):
     user = getattr(request, "clerk_user", None)
 
     if user and user.is_authenticated:
-        return JsonResponse({
-            "message": "Hello! You are authenticated.",
-            "authenticated": True,
-            "user_id": str(user.clerk_id),
-        })
+        return JsonResponse(
+            {
+                "message": "Hello! You are authenticated.",
+                "authenticated": True,
+                "user_id": str(user.clerk_id),
+            }
+        )
 
-    return JsonResponse({
-        "message": "Hello! You are not authenticated.",
-        "authenticated": False,
-    })
+    return JsonResponse(
+        {
+            "message": "Hello! You are not authenticated.",
+            "authenticated": False,
+        }
+    )
 
 
 @clerk_user_required
@@ -35,15 +39,17 @@ def protected_view(request):
     """
     user = request.clerk_user
 
-    return JsonResponse({
-        "message": "You have accessed a protected resource!",
-        "user": {
-            "clerk_id": user.clerk_id,
-            "email": user.email,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-        },
-    })
+    return JsonResponse(
+        {
+            "message": "You have accessed a protected resource!",
+            "user": {
+                "clerk_id": user.clerk_id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+            },
+        }
+    )
 
 
 @clerk_user_required
@@ -53,16 +59,18 @@ def user_profile_view(request):
     """
     user = request.clerk_user
 
-    return JsonResponse({
-        "profile": {
-            "clerk_id": user.clerk_id,
-            "email": user.email,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "is_active": user.is_active,
-            "is_staff": user.is_staff,
-            "created_at": user.created_at.isoformat() if user.created_at else None,
-            "last_login": user.last_login.isoformat() if user.last_login else None,
-        },
-        "org_id": getattr(request, "org", None),
-    })
+    return JsonResponse(
+        {
+            "profile": {
+                "clerk_id": user.clerk_id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "is_active": user.is_active,
+                "is_staff": user.is_staff,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "last_login": user.last_login.isoformat() if user.last_login else None,
+            },
+            "org_id": getattr(request, "org", None),
+        }
+    )

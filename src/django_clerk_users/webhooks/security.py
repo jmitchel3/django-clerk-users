@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def verify_clerk_webhook(request: "HttpRequest") -> dict[str, Any]:
+def verify_clerk_webhook(request: HttpRequest) -> dict[str, Any]:
     """
     Verify a Clerk webhook signature using Svix.
 
@@ -90,7 +90,7 @@ def clerk_webhook_required(view_func: Callable) -> Callable:
 
     @csrf_exempt
     @functools.wraps(view_func)
-    def wrapper(request: "HttpRequest", *args, **kwargs):
+    def wrapper(request: HttpRequest, *args, **kwargs):
         if request.method != "POST":
             return HttpResponseBadRequest("Only POST requests are allowed")
 

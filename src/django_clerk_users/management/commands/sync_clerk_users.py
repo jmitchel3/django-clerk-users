@@ -86,21 +86,26 @@ class Command(BaseCommand):
                 email_addresses = getattr(clerk_user, "email_addresses", []) or []
                 if email_addresses:
                     email = getattr(email_addresses[0], "email_address", None)
+                username = getattr(clerk_user, "username", None)
+
+                # Display identifier: prefer email, then username, then clerk_id
+                display_id = email or username or clerk_id
 
                 if dry_run:
-                    self.stdout.write(f"  Would sync: {email} ({clerk_id})")
+                    self.stdout.write(f"  Would sync: {display_id} ({clerk_id})")
                     continue
 
                 try:
                     user, created = update_or_create_clerk_user(clerk_id)
+                    user_display = user.email or user.username or user.clerk_id
                     if created:
                         created_count += 1
                         self.stdout.write(
-                            self.style.SUCCESS(f"  Created: {user.email}")
+                            self.style.SUCCESS(f"  Created: {user_display}")
                         )
                     else:
                         updated_count += 1
-                        self.stdout.write(f"  Updated: {user.email}")
+                        self.stdout.write(f"  Updated: {user_display}")
                 except Exception as e:
                     error_count += 1
                     self.stderr.write(

@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def get_bearer_token(request: "HttpRequest") -> str | None:
+def get_bearer_token(request: HttpRequest) -> str | None:
     """
     Extract the Bearer token from the Authorization header.
 
@@ -44,7 +44,7 @@ def get_bearer_token(request: "HttpRequest") -> str | None:
     return None
 
 
-def get_clerk_payload_from_request(request: "HttpRequest") -> dict[str, Any] | None:
+def get_clerk_payload_from_request(request: HttpRequest) -> dict[str, Any] | None:
     """
     Validate a Clerk JWT token and return the payload.
 
@@ -125,7 +125,7 @@ def get_clerk_payload_from_request(request: "HttpRequest") -> dict[str, Any] | N
 
 def get_or_create_user_from_payload(
     payload: dict[str, Any],
-) -> tuple["AbstractClerkUser", bool]:
+) -> tuple[AbstractClerkUser, bool]:
     """
     Get or create a Django user from a Clerk JWT payload.
 
@@ -163,7 +163,7 @@ def get_or_create_user_from_payload(
         raise ClerkAuthenticationError(f"Failed to create user: {e}") from e
 
 
-def get_user_from_clerk_id(clerk_id: str) -> "AbstractClerkUser | None":
+def get_user_from_clerk_id(clerk_id: str) -> AbstractClerkUser | None:
     """
     Get a Django user by their Clerk ID.
 

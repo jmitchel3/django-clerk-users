@@ -32,7 +32,7 @@ def get_org_cache_key(clerk_id: str) -> str:
     return f"{ORG_CACHE_PREFIX}{clerk_id}"
 
 
-def get_cached_user(clerk_id: str, query_db: bool = True) -> "AbstractClerkUser | None":
+def get_cached_user(clerk_id: str, query_db: bool = True) -> AbstractClerkUser | None:
     """
     Get a user from cache or database.
 
@@ -71,7 +71,7 @@ def get_cached_user(clerk_id: str, query_db: bool = True) -> "AbstractClerkUser 
         return None
 
 
-def set_cached_user(clerk_id: str, user: "AbstractClerkUser | None") -> None:
+def set_cached_user(clerk_id: str, user: AbstractClerkUser | None) -> None:
     """
     Cache a user by Clerk ID.
 

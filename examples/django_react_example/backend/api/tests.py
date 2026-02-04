@@ -11,14 +11,13 @@ Prerequisites:
 See: https://clerk.com/docs/testing/overview
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-from django.test import TestCase, override_settings
+from django.test import TestCase
 
 from django_clerk_users.testing import (
     TEST_OTP_CODE,
     ClerkTestClient,
-    ClerkTestMixin,
     TestUserData,
     make_test_email,
     make_test_phone,

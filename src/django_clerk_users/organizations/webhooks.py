@@ -53,8 +53,10 @@ def update_or_create_organization(org_id: str) -> tuple:
         "public_metadata": getattr(clerk_org, "public_metadata", {}) or {},
         "private_metadata": getattr(clerk_org, "private_metadata", {}) or {},
         "members_count": getattr(clerk_org, "members_count", 0) or 0,
-        "pending_invitations_count": getattr(clerk_org, "pending_invitations_count", 0) or 0,
-        "max_allowed_memberships": getattr(clerk_org, "max_allowed_memberships", 0) or 0,
+        "pending_invitations_count": getattr(clerk_org, "pending_invitations_count", 0)
+        or 0,
+        "max_allowed_memberships": getattr(clerk_org, "max_allowed_memberships", 0)
+        or 0,
     }
 
     created_at = parse_clerk_timestamp(getattr(clerk_org, "created_at", None))
@@ -178,6 +180,7 @@ def handle_membership_created(data: dict[str, Any]) -> bool:
         user = User.objects.filter(clerk_id=user_id).first()
         if not user:
             from django_clerk_users.utils import update_or_create_clerk_user
+
             user, _ = update_or_create_clerk_user(user_id)
 
         membership, created = OrganizationMember.objects.update_or_create(
@@ -225,8 +228,12 @@ def handle_membership_updated(data: dict[str, Any]) -> bool:
         ).first()
         if membership:
             membership.role = data.get("role", membership.role)
-            membership.public_metadata = data.get("public_metadata", membership.public_metadata)
-            membership.private_metadata = data.get("private_metadata", membership.private_metadata)
+            membership.public_metadata = data.get(
+                "public_metadata", membership.public_metadata
+            )
+            membership.private_metadata = data.get(
+                "private_metadata", membership.private_metadata
+            )
             membership.save()
 
             clerk_membership_updated.send(
@@ -276,7 +283,10 @@ def handle_invitation_created(data: dict[str, Any]) -> bool:
     """Handle organizationInvitation.created webhook event."""
     from django.contrib.auth import get_user_model
 
-    from django_clerk_users.organizations.models import Organization, OrganizationInvitation
+    from django_clerk_users.organizations.models import (
+        Organization,
+        OrganizationInvitation,
+    )
 
     User = get_user_model()
 

@@ -6,7 +6,6 @@ import uuid
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 
 from django_clerk_users.organizations.models import (
     Organization,
@@ -325,7 +324,9 @@ class TestOrganizationRelationships:
         organization.delete()
 
         assert not OrganizationMember.objects.filter(organization_id=org_id).exists()
-        assert not OrganizationInvitation.objects.filter(organization_id=org_id).exists()
+        assert not OrganizationInvitation.objects.filter(
+            organization_id=org_id
+        ).exists()
 
     def test_cascade_delete_user_memberships(self, clerk_user, membership):
         """Test that deleting user cascades to memberships."""
@@ -336,7 +337,6 @@ class TestOrganizationRelationships:
 
     def test_set_null_inviter_on_delete(self, clerk_user, invitation):
         """Test that deleting inviter sets invitation.inviter to null."""
-        inv_id = invitation.id
         clerk_user.delete()
 
         invitation.refresh_from_db()

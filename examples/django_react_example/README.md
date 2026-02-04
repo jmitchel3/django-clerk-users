@@ -126,12 +126,12 @@ frontend/
 
 ```python
 INSTALLED_APPS = [
-    ...
+    # ... other apps ...
     "django_clerk_users",
 ]
 
 MIDDLEWARE = [
-    ...
+    # ... other middleware ...
     "django_clerk_users.middleware.ClerkAuthMiddleware",
 ]
 
@@ -144,6 +144,7 @@ CLERK_FRONTEND_HOSTS = ["http://localhost:5173"]
 
 ```python
 from django_clerk_users.decorators import clerk_user_required
+
 
 @clerk_user_required
 def protected_view(request):

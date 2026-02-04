@@ -62,8 +62,8 @@ class ClerkAuthentication(_BaseAuthentication):
         super().__init__()
 
     def authenticate(
-        self, request: "HttpRequest"
-    ) -> tuple["AbstractClerkUser", dict] | None:
+        self, request: HttpRequest
+    ) -> tuple[AbstractClerkUser, dict] | None:
         """
         Authenticate the request and return a tuple of (user, auth).
 
@@ -98,7 +98,7 @@ class ClerkAuthentication(_BaseAuthentication):
 
         return (user, payload)
 
-    def authenticate_header(self, request: "HttpRequest") -> str:
+    def authenticate_header(self, request: HttpRequest) -> str:
         """
         Return a string to be used as the WWW-Authenticate header.
 

@@ -32,6 +32,4 @@ CLERK_CACHE_TIMEOUT: int = getattr(settings, "CLERK_CACHE_TIMEOUT", 300)
 CLERK_ORG_CACHE_TIMEOUT: int = getattr(settings, "CLERK_ORG_CACHE_TIMEOUT", 900)
 
 # Webhook deduplication cache timeout (default: 45 seconds)
-CLERK_WEBHOOK_DEDUP_TIMEOUT: int = getattr(
-    settings, "CLERK_WEBHOOK_DEDUP_TIMEOUT", 45
-)
+CLERK_WEBHOOK_DEDUP_TIMEOUT: int = getattr(settings, "CLERK_WEBHOOK_DEDUP_TIMEOUT", 45)

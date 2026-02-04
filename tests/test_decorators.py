@@ -3,7 +3,6 @@ Tests for django-clerk-users decorators.
 """
 
 import json
-from unittest.mock import MagicMock
 
 import pytest
 from django.contrib.auth import get_user_model

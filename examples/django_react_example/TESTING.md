@@ -55,14 +55,15 @@ from django_clerk_users.testing import (
     TEST_OTP_CODE,
 )
 
+
 # Option 1: Use ClerkTestMixin for automatic setup/teardown
 class MyTestCase(ClerkTestMixin, TestCase):
     def test_protected_endpoint(self):
         response = self.client.get(
-            "/api/protected/",
-            **self.get_auth_header()  # Uses self.test_user
+            "/api/protected/", **self.get_auth_header()  # Uses self.test_user
         )
         self.assertEqual(response.status_code, 200)
+
 
 # Option 2: Manual control with ClerkTestClient
 class ManualTestCase(TestCase):
@@ -84,21 +85,16 @@ class ManualTestCase(TestCase):
 from django_clerk_users.testing import (
     # Client for creating test users via Clerk API
     ClerkTestClient,
-
     # Mixin for Django TestCase with automatic user setup
     ClerkTestMixin,
-
     # Data class for test user info
     TestUserData,
-
     # Generate test email addresses
-    make_test_email,      # -> "testuser+clerk_test_abc123@example.com"
-
+    make_test_email,  # -> "testuser+clerk_test_abc123@example.com"
     # Generate test phone numbers
-    make_test_phone,      # -> "+12015550100"
-
+    make_test_phone,  # -> "+12015550100"
     # OTP code for test mode
-    TEST_OTP_CODE,        # "424242"
+    TEST_OTP_CODE,  # "424242"
 )
 ```
 
@@ -120,8 +116,7 @@ token = client.get_session_token(user.id)
 
 # Use in requests
 response = requests.get(
-    "http://localhost:8000/api/protected/",
-    headers={"Authorization": f"Bearer {token}"}
+    "http://localhost:8000/api/protected/", headers={"Authorization": f"Bearer {token}"}
 )
 
 # Clean up

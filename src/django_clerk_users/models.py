@@ -53,10 +53,20 @@ class AbstractClerkUser(AbstractBaseUser, PermissionsMixin):
     # for Clerk users (who authenticate via JWT) but required for admin users
 
     # Standard user fields
+    username = models.CharField(
+        max_length=150,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="User's username from Clerk (optional).",
+    )
     email = models.EmailField(
         unique=True,
+        null=True,
+        blank=True,
         db_index=True,
-        help_text="User's email address.",
+        help_text="User's email address. May be null for username-only Clerk users.",
     )
     first_name = models.CharField(
         max_length=255,
@@ -118,12 +128,13 @@ class AbstractClerkUser(AbstractBaseUser, PermissionsMixin):
         indexes = [
             models.Index(fields=["clerk_id"]),
             models.Index(fields=["email"]),
+            models.Index(fields=["username"]),
             models.Index(fields=["uid"]),
             models.Index(fields=["is_active"]),
         ]
 
     def __str__(self) -> str:
-        return self.email
+        return self.email or self.username or self.clerk_id or str(self.uid)
 
     @property
     def public_id(self) -> str:
@@ -140,8 +151,14 @@ class AbstractClerkUser(AbstractBaseUser, PermissionsMixin):
         return self.full_name
 
     def get_short_name(self) -> str:
-        """Return the user's first name (Django compatibility)."""
-        return self.first_name or self.email.split("@")[0]
+        """Return the user's short name (Django compatibility)."""
+        if self.first_name:
+            return self.first_name
+        if self.username:
+            return self.username
+        if self.email:
+            return self.email.split("@")[0]
+        return str(self.uid)[:8]
 
     def has_perm(self, perm: str, obj: Any = None) -> bool:
         """
