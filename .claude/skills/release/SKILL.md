@@ -35,8 +35,9 @@ Release a new version of django-clerk-users to PyPI via GitHub Actions.
 5. Commit the version change:
    ```bash
    git add pyproject.toml
-   git commit -m "Release vX.Y.Z [skip ci]"
+   git commit -m "Release vX.Y.Z"
    ```
+   Note: Do NOT use `[skip ci]` - this would prevent the tag-triggered release workflow from running.
 
 6. Push to main:
    ```bash
@@ -58,4 +59,5 @@ Release a new version of django-clerk-users to PyPI via GitHub Actions.
 - Tags should be prefixed with `v` (e.g., `v0.1.4`)
 - The version in `pyproject.toml` must match the tag (without the `v` prefix)
 - Ensure working directory is clean before starting (except for the version bump)
-- GitHub Actions will automatically run tests and publish to PyPI when the tag is pushed
+- The `release.yaml` workflow runs tests and publishes to PyPI when a tag is pushed
+- The `ci.yaml` workflow runs tests on main branch pushes and PRs (separate from releases)
