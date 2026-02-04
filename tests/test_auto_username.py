@@ -123,9 +123,13 @@ class TestAutoGenerateUsernameSetting:
 class TestGenerateUsernameForUser:
     """Tests for generate_username_for_user utility function."""
 
-    def test_generate_for_user_by_pk(self, db):
+    @patch("django_clerk_users.utils.get_clerk_client")
+    def test_generate_for_user_by_pk(self, mock_get_client, db):
         """Test generating username for user by primary key."""
         from django_clerk_users.utils import generate_username_for_user
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
 
         user = User.objects.create(clerk_id="clerk_pk_test", username=None)
 
@@ -135,10 +139,18 @@ class TestGenerateUsernameForUser:
         assert result is not None
         assert result.startswith("user_")
         assert user.username == result
+        # Verify Clerk was called to sync
+        mock_client.users.update.assert_called_once_with(
+            user_id="clerk_pk_test", username=result
+        )
 
-    def test_generate_for_user_by_clerk_id(self, db):
+    @patch("django_clerk_users.utils.get_clerk_client")
+    def test_generate_for_user_by_clerk_id(self, mock_get_client, db):
         """Test generating username for user by clerk_id."""
         from django_clerk_users.utils import generate_username_for_user
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
 
         user = User.objects.create(clerk_id="clerk_id_test", username=None)
 
@@ -148,10 +160,15 @@ class TestGenerateUsernameForUser:
         assert result is not None
         assert result.startswith("user_")
         assert user.username == result
+        mock_client.users.update.assert_called_once()
 
-    def test_generate_with_custom_prefix(self, db):
+    @patch("django_clerk_users.utils.get_clerk_client")
+    def test_generate_with_custom_prefix(self, mock_get_client, db):
         """Test generating username with custom prefix."""
         from django_clerk_users.utils import generate_username_for_user
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
 
         user = User.objects.create(clerk_id="clerk_prefix_test", username=None)
 
@@ -174,9 +191,13 @@ class TestGenerateUsernameForUser:
         assert result == "existing"
         assert user.username == "existing"
 
-    def test_force_regenerate(self, db):
+    @patch("django_clerk_users.utils.get_clerk_client")
+    def test_force_regenerate(self, mock_get_client, db):
         """Test force regenerating username."""
         from django_clerk_users.utils import generate_username_for_user
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
 
         user = User.objects.create(clerk_id="clerk_force_test", username="existing")
 
@@ -195,9 +216,13 @@ class TestGenerateUsernameForUser:
 
         assert result is None
 
-    def test_generate_for_user_by_pk_string(self, db):
+    @patch("django_clerk_users.utils.get_clerk_client")
+    def test_generate_for_user_by_pk_string(self, mock_get_client, db):
         """Test generating username for user by pk as string."""
         from django_clerk_users.utils import generate_username_for_user
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
 
         user = User.objects.create(clerk_id="clerk_pk_str_test", username=None)
 
@@ -216,6 +241,33 @@ class TestGenerateUsernameForUser:
         result = generate_username_for_user("not_a_valid_id")
 
         assert result is None
+
+    def test_sync_to_clerk_disabled(self, db):
+        """Test that sync_to_clerk=False skips Clerk API call."""
+        from django_clerk_users.utils import generate_username_for_user
+
+        user = User.objects.create(clerk_id="clerk_no_sync_test", username=None)
+
+        # No mock needed - if it tries to call Clerk it will fail
+        result = generate_username_for_user(user.pk, sync_to_clerk=False)
+
+        user.refresh_from_db()
+        assert result is not None
+        assert user.username == result
+
+    def test_sync_skipped_for_user_without_clerk_id(self, db):
+        """Test that sync is skipped for users without a clerk_id (admin users)."""
+        from django_clerk_users.utils import generate_username_for_user
+
+        # User without clerk_id (like a Django admin user)
+        user = User.objects.create(clerk_id=None, username=None, email="admin@test.com")
+
+        # No mock needed - sync should be skipped
+        result = generate_username_for_user(user.pk)
+
+        user.refresh_from_db()
+        assert result is not None
+        assert user.username == result
 
 
 class TestGenerateUsernamesForUsersWithout:

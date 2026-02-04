@@ -264,6 +264,7 @@ def generate_username_for_user(
     user_id: int | str,
     prefix: str | None = None,
     force: bool = False,
+    sync_to_clerk: bool = True,
 ) -> str | None:
     """
     Generate and set a username for a user who doesn't have one.
@@ -275,6 +276,7 @@ def generate_username_for_user(
         user_id: The Django user ID (pk) or Clerk user ID (clerk_id).
         prefix: Optional username prefix. Uses CLERK_AUTO_GENERATE_USERNAME_PREFIX if not provided.
         force: If True, regenerate username even if user already has one.
+        sync_to_clerk: If True (default), sync the username to Clerk.
 
     Returns:
         The generated username, or None if user not found or already has username (and force=False).
@@ -320,6 +322,15 @@ def generate_username_for_user(
     username = User.objects.generate_unique_username(prefix=prefix)
     user.username = username
     user.save(update_fields=["username"])
+
+    # Sync to Clerk if enabled and user has a clerk_id
+    if sync_to_clerk and user.clerk_id:
+        try:
+            clerk = get_clerk_client()
+            clerk.users.update(user_id=user.clerk_id, username=username)
+            logger.info(f"Synced username '{username}' to Clerk for user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to sync username to Clerk for user {user_id}: {e}")
 
     logger.info(f"Generated username '{username}' for user {user_id}")
     return username
