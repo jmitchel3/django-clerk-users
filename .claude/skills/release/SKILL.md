@@ -35,7 +35,7 @@ Release a new version of django-clerk-users to PyPI via GitHub Actions.
 5. Commit the version change:
    ```bash
    git add pyproject.toml
-   git commit -m "Release vX.Y.Z"
+   git commit -m "Release vX.Y.Z [skip ci]"
    ```
 
 6. Push to main:
