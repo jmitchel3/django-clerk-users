@@ -323,6 +323,25 @@ count = generate_usernames_for_users_without()
 count = generate_usernames_for_users_without(prefix="member")
 ```
 
+## Password Sync
+
+When you change a user's password in Django, it can automatically sync to Clerk:
+
+```python
+# Sync password to both Django and Clerk (default)
+user.set_password("new_password")
+user.save()
+
+# Django only - skip Clerk sync
+user.set_password("new_password", sync_to_clerk=False)
+user.save()
+```
+
+Notes:
+- Sync is enabled by default (`sync_to_clerk=True`)
+- Users without a `clerk_id` (e.g., Django admin users) skip Clerk sync automatically
+- Clerk API errors are logged but don't prevent the Django password from being set
+
 ## Configuration Reference
 
 | Setting | Required | Default | Description |
