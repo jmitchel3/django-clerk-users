@@ -10,6 +10,7 @@ import functools
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
+from django.conf import settings
 from django.http import HttpResponseBadRequest, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from svix.webhooks import Webhook, WebhookVerificationError
@@ -23,27 +24,55 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def verify_clerk_webhook(request: HttpRequest) -> dict[str, Any]:
+def _get_webhook_signing_key(
+    signing_key: str | None,
+    signing_key_setting: str,
+) -> str | None:
+    if signing_key is not None:
+        return signing_key
+
+    if signing_key_setting == "CLERK_WEBHOOK_SIGNING_KEY":
+        return getattr(settings, signing_key_setting, CLERK_WEBHOOK_SIGNING_KEY)
+
+    return getattr(settings, signing_key_setting, None)
+
+
+def verify_clerk_webhook(
+    request: HttpRequest,
+    *,
+    signing_key: str | None = None,
+    signing_key_setting: str = "CLERK_WEBHOOK_SIGNING_KEY",
+    allow_missing: bool = False,
+) -> dict[str, Any] | None:
     """
     Verify a Clerk webhook signature using Svix.
 
     Args:
         request: The Django HTTP request containing the webhook payload.
+        signing_key: Explicit Svix signing secret for this webhook endpoint.
+        signing_key_setting: Django setting name to read when signing_key is not
+            provided. Defaults to CLERK_WEBHOOK_SIGNING_KEY.
+        allow_missing: Return None instead of raising when no signing key is
+            configured. Useful for local development or test-only endpoints.
 
     Returns:
-        The verified webhook payload as a dictionary.
+        The verified webhook payload as a dictionary, or None when allow_missing
+        is True and no signing key is configured.
 
     Raises:
         ClerkWebhookError: If verification fails or signing key is not configured.
     """
-    if not CLERK_WEBHOOK_SIGNING_KEY:
+    resolved_signing_key = _get_webhook_signing_key(signing_key, signing_key_setting)
+    if not resolved_signing_key:
+        if allow_missing:
+            return None
         raise ClerkWebhookError(
-            "CLERK_WEBHOOK_SIGNING_KEY is not configured. "
+            f"{signing_key_setting} is not configured. "
             "Set it in your Django settings to enable webhook verification."
         )
 
     try:
-        wh = Webhook(CLERK_WEBHOOK_SIGNING_KEY)
+        wh = Webhook(resolved_signing_key)
 
         # Svix expects specific headers
         headers = {
@@ -64,7 +93,13 @@ def verify_clerk_webhook(request: HttpRequest) -> dict[str, Any]:
         raise ClerkWebhookError(f"Webhook verification error: {e}") from e
 
 
-def clerk_webhook_required(view_func: Callable) -> Callable:
+def clerk_webhook_required(
+    view_func: Callable | None = None,
+    *,
+    signing_key: str | None = None,
+    signing_key_setting: str = "CLERK_WEBHOOK_SIGNING_KEY",
+    allow_missing: bool = False,
+) -> Callable:
     """
     Decorator that verifies Clerk webhook signatures.
 
@@ -81,6 +116,14 @@ def clerk_webhook_required(view_func: Callable) -> Callable:
             # Process the webhook...
             return HttpResponse("OK")
 
+        @clerk_webhook_required(
+            signing_key_setting="CLERK_ACTIVATION_WEBHOOK_SIGNING_KEY"
+        )
+        def activation_webhook_view(request):
+            data = request.clerk_webhook_data
+            # Process the endpoint-specific webhook...
+            return HttpResponse("OK")
+
     The decorator:
     1. Exempts the view from CSRF protection (webhooks can't have CSRF tokens)
     2. Verifies the Svix signature
@@ -88,21 +131,32 @@ def clerk_webhook_required(view_func: Callable) -> Callable:
     4. Returns 400/403 responses on verification failure
     """
 
-    @csrf_exempt
-    @functools.wraps(view_func)
-    def wrapper(request: HttpRequest, *args, **kwargs):
-        if request.method != "POST":
-            return HttpResponseBadRequest("Only POST requests are allowed")
+    def decorator(func: Callable) -> Callable:
+        @csrf_exempt
+        @functools.wraps(func)
+        def wrapper(request: HttpRequest, *args, **kwargs):
+            if request.method != "POST":
+                return HttpResponseBadRequest("Only POST requests are allowed")
 
-        try:
-            payload = verify_clerk_webhook(request)
-        except ClerkWebhookError as e:
-            logger.warning(f"Webhook verification failed: {e}")
-            return HttpResponseForbidden(str(e))
+            try:
+                payload = verify_clerk_webhook(
+                    request,
+                    signing_key=signing_key,
+                    signing_key_setting=signing_key_setting,
+                    allow_missing=allow_missing,
+                )
+            except ClerkWebhookError as e:
+                logger.warning(f"Webhook verification failed: {e}")
+                return HttpResponseForbidden(str(e))
 
-        # Attach verified payload to request
-        request.clerk_webhook_data = payload  # type: ignore
+            # Attach verified payload to request
+            request.clerk_webhook_data = payload  # type: ignore
 
-        return view_func(request, *args, **kwargs)
+            return func(request, *args, **kwargs)
 
-    return wrapper
+        return wrapper
+
+    if view_func is None:
+        return decorator
+
+    return decorator(view_func)

@@ -32,12 +32,15 @@ try:
 
     _drf_available = True
     _BaseAuthentication: Any = authentication.BaseAuthentication
+    _SessionAuthentication: Any = authentication.SessionAuthentication
 except ImportError:
     _drf_import_error = (
         "Django REST Framework is required for ClerkAuthentication. "
         "Install it with: pip install django-clerk-users[drf]"
     )
     _BaseAuthentication = object
+    _SessionAuthentication = object
+    exceptions = None  # type: ignore[assignment]
 
 
 class ClerkAuthentication(_BaseAuthentication):
@@ -108,4 +111,57 @@ class ClerkAuthentication(_BaseAuthentication):
         Returns:
             The authentication scheme identifier.
         """
+        return "Bearer"
+
+
+class CsrfExemptSessionAuthentication(_SessionAuthentication):
+    """
+    DRF SessionAuthentication variant that does not enforce CSRF.
+
+    Use this only for APIs where session cookies are created by your own login
+    flow and requests are same-origin or otherwise protected by your app.
+    """
+
+    def __init__(self) -> None:
+        if not _drf_available:
+            raise ImportError(_drf_import_error)
+        super().__init__()
+
+    def enforce_csrf(self, request: HttpRequest) -> None:
+        return None
+
+
+class ClerkSessionAuthentication(_BaseAuthentication):
+    """
+    DRF authentication that supports Clerk bearer tokens and Django sessions.
+
+    Clerk bearer tokens take precedence. If an Authorization: Bearer header is
+    present, Clerk authentication handles the request and any Clerk failure is
+    surfaced as an authentication failure. Requests without a bearer token fall
+    back to Django session authentication.
+    """
+
+    clerk_authentication_class = ClerkAuthentication
+    session_authentication_class = CsrfExemptSessionAuthentication
+
+    def __init__(self) -> None:
+        if not _drf_available:
+            raise ImportError(_drf_import_error)
+        super().__init__()
+        self.clerk_authentication = self.clerk_authentication_class()
+        self.session_authentication = self.session_authentication_class()
+
+    def authenticate(
+        self, request: HttpRequest
+    ) -> tuple[AbstractClerkUser, dict] | None:
+        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+        if isinstance(auth_header, bytes):
+            auth_header = auth_header.decode("latin1")
+
+        if auth_header.lower().startswith("bearer "):
+            return self.clerk_authentication.authenticate(request)
+
+        return self.session_authentication.authenticate(request)
+
+    def authenticate_header(self, request: HttpRequest) -> str:
         return "Bearer"

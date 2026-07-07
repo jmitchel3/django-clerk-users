@@ -26,6 +26,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+
+    - name: Install dependencies
+      run: uv sync --group dev --frozen
+
+    - name: Run Ruff
+      run: uv run ruff check .
+
+    - name: Check migrations
+      env:
+        DJANGO_SETTINGS_MODULE: tests.settings
+      run: uv run python -m django makemigrations --check --dry-run
+
   tests:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-24.04

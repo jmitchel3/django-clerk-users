@@ -5,7 +5,7 @@ Core utilities for django-clerk-users.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from django_clerk_users.caching import (
     get_cached_user,
@@ -13,12 +13,147 @@ from django_clerk_users.caching import (
     set_cached_user,
 )
 from django_clerk_users.client import get_clerk_client
-from django_clerk_users.exceptions import ClerkAPIError, ClerkUserNotFoundError
+from django_clerk_users.exceptions import (
+    ClerkAPIError,
+    ClerkUserMergeConflictError,
+    ClerkUserNotFoundError,
+)
 
 if TYPE_CHECKING:
     from django_clerk_users.models import AbstractClerkUser
 
 logger = logging.getLogger(__name__)
+
+
+def _default_duplicate_is_disposable(user: AbstractClerkUser) -> bool:
+    return not (
+        user.is_staff
+        or user.is_superuser
+        or user.has_usable_password()
+        or user.groups.exists()
+        or user.user_permissions.exists()
+    )
+
+
+def absorb_clerk_user_duplicate(
+    target_user: AbstractClerkUser,
+    *,
+    email: str | None = None,
+    duplicate_user: AbstractClerkUser | None = None,
+    safe_to_delete: Callable[[AbstractClerkUser], bool] | None = None,
+    delete_duplicate: bool = True,
+    replace_existing_clerk_id: bool = True,
+) -> bool:
+    """
+    Move a Clerk identity from a fresh duplicate user onto a target user.
+
+    This is for claim/conversion flows where Clerk creates a new Django user for
+    a real email before the app links that Clerk identity to a pre-existing
+    account. The helper deliberately does not run during normal authentication;
+    call it only when your app has confirmed the target account and duplicate
+    policy.
+
+    Args:
+        target_user: The existing Django user that should receive the Clerk ID.
+        email: Case-insensitive email used to locate the duplicate when
+            duplicate_user is not provided.
+        duplicate_user: Explicit duplicate user to absorb.
+        safe_to_delete: Optional predicate for app-specific data checks. Return
+            True only when deleting or clearing the duplicate is safe. Without a
+            predicate, only a simple unelevated passwordless user is disposable.
+        delete_duplicate: Delete the duplicate row after moving its Clerk ID.
+            Set False only if your app has a separate retirement strategy.
+        replace_existing_clerk_id: Allow replacing target_user.clerk_id when it
+            already has a different Clerk ID.
+
+    Returns:
+        True when a duplicate was found and absorbed, otherwise False.
+
+    Raises:
+        ValueError: If neither email nor duplicate_user is provided.
+        ClerkUserMergeConflictError: If the duplicate is not disposable or the
+            target already has a different Clerk ID and replacement is disabled.
+    """
+    if duplicate_user is None and not email:
+        raise ValueError("email or duplicate_user is required")
+
+    from django.contrib.auth import get_user_model
+    from django.db import transaction
+
+    User = get_user_model()
+
+    with transaction.atomic():
+        target = User.objects.select_for_update().get(pk=target_user.pk)
+
+        if duplicate_user is not None:
+            if duplicate_user.pk == target.pk:
+                return False
+            duplicate = (
+                User.objects.select_for_update().filter(pk=duplicate_user.pk).first()
+            )
+        else:
+            duplicate = (
+                User.objects.select_for_update()
+                .filter(email__iexact=email)
+                .exclude(pk=target.pk)
+                .first()
+            )
+
+        if duplicate is None:
+            return False
+
+        predicate = safe_to_delete or _default_duplicate_is_disposable
+        if not predicate(duplicate):
+            identifier = email or duplicate.pk
+            raise ClerkUserMergeConflictError(
+                f"User {duplicate.pk} already holds {identifier} and is not safe "
+                "to absorb automatically."
+            )
+
+        old_clerk_id = target.clerk_id
+        new_clerk_id = duplicate.clerk_id
+
+        if (
+            old_clerk_id
+            and new_clerk_id
+            and old_clerk_id != new_clerk_id
+            and not replace_existing_clerk_id
+        ):
+            raise ClerkUserMergeConflictError(
+                f"Target user {target.pk} already has Clerk ID {old_clerk_id}."
+            )
+
+        if delete_duplicate:
+            duplicate_pk = duplicate.pk
+            duplicate.delete()
+            duplicate_deleted = True
+        else:
+            duplicate_pk = duplicate.pk
+            duplicate_deleted = False
+            if new_clerk_id:
+                duplicate.clerk_id = None
+                duplicate.save(update_fields=["clerk_id"])
+                if duplicate_user is not None:
+                    duplicate_user.clerk_id = None
+
+        if new_clerk_id and target.clerk_id != new_clerk_id:
+            target.clerk_id = new_clerk_id
+            target.save(update_fields=["clerk_id"])
+
+        target_user.clerk_id = target.clerk_id
+
+    for clerk_id in {old_clerk_id, new_clerk_id}:
+        if clerk_id:
+            invalidate_clerk_user_cache(clerk_id)
+
+    logger.info(
+        "Absorbed Clerk duplicate user %s into user %s (clerk_id=%s, deleted=%s)",
+        duplicate_pk,
+        target_user.pk,
+        new_clerk_id or "-",
+        duplicate_deleted,
+    )
+    return True
 
 
 def update_or_create_clerk_user(

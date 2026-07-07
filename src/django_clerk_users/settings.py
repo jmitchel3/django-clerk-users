@@ -31,6 +31,9 @@ CLERK_CACHE_TIMEOUT: int = getattr(settings, "CLERK_CACHE_TIMEOUT", 300)
 # Cache timeout for organization lookups (default: 15 minutes)
 CLERK_ORG_CACHE_TIMEOUT: int = getattr(settings, "CLERK_ORG_CACHE_TIMEOUT", 900)
 
+# Default timeout for server-side Clerk SDK helper calls (milliseconds)
+CLERK_API_TIMEOUT_MS: int = getattr(settings, "CLERK_API_TIMEOUT_MS", 10_000)
+
 # Webhook deduplication cache timeout (default: 45 seconds)
 CLERK_WEBHOOK_DEDUP_TIMEOUT: int = getattr(settings, "CLERK_WEBHOOK_DEDUP_TIMEOUT", 45)
 
@@ -44,4 +47,13 @@ CLERK_AUTO_GENERATE_USERNAME: bool = getattr(
 # Usernames will be generated as: {prefix}_{uuid8} (e.g., "user_abc12345")
 CLERK_AUTO_GENERATE_USERNAME_PREFIX: str = getattr(
     settings, "CLERK_AUTO_GENERATE_USERNAME_PREFIX", "user"
+)
+
+# Password sync is enabled by default for backwards compatibility.
+# CLERK_DISABLE_PASSWORD_SYNC is retained for apps that already use that flag.
+CLERK_DISABLE_PASSWORD_SYNC: bool = getattr(
+    settings, "CLERK_DISABLE_PASSWORD_SYNC", False
+)
+CLERK_SYNC_PASSWORDS: bool = getattr(
+    settings, "CLERK_SYNC_PASSWORDS", not CLERK_DISABLE_PASSWORD_SYNC
 )

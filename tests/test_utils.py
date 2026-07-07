@@ -8,8 +8,14 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 
-from django_clerk_users.exceptions import ClerkAPIError, ClerkUserNotFoundError
+from django_clerk_users.caching import get_user_cache_key, set_cached_user
+from django_clerk_users.exceptions import (
+    ClerkAPIError,
+    ClerkUserMergeConflictError,
+    ClerkUserNotFoundError,
+)
 from django_clerk_users.utils import (
+    absorb_clerk_user_duplicate,
     get_clerk_user,
     get_user_metadata,
     sync_user_from_clerk,
@@ -325,6 +331,163 @@ class TestUpdateOrCreateClerkUser:
 
         assert created is False
         assert user.email == "newemail@example.com"
+
+
+class TestAbsorbClerkUserDuplicate:
+    """Test adopting Clerk IDs from fresh duplicate users."""
+
+    def test_no_duplicate_returns_false(self, db):
+        User = get_user_model()
+        target = User.objects.create_user(
+            email="historical@students.internal",
+            clerk_id=None,
+        )
+
+        assert (
+            absorb_clerk_user_duplicate(target, email="claimed@example.com") is False
+        )
+
+    def test_absorbs_fresh_duplicate_by_email(self, db):
+        User = get_user_model()
+        target = User.objects.create_user(
+            email="historical@students.internal",
+            clerk_id=None,
+        )
+        duplicate = User.objects.create_user(
+            email="claimed@example.com",
+            clerk_id="user_claimed",
+        )
+        set_cached_user("user_claimed", duplicate)
+
+        absorbed = absorb_clerk_user_duplicate(
+            target,
+            email="CLAIMED@example.com",
+        )
+
+        target.refresh_from_db()
+        assert absorbed is True
+        assert target.clerk_id == "user_claimed"
+        assert not User.objects.filter(pk=duplicate.pk).exists()
+        assert cache.get(get_user_cache_key("user_claimed")) is None
+
+    def test_absorbs_explicit_duplicate_user_without_deleting(self, db):
+        User = get_user_model()
+        target = User.objects.create_user(
+            email="target@example.com",
+            clerk_id=None,
+        )
+        duplicate = User.objects.create_user(
+            email="duplicate@example.com",
+            clerk_id="user_duplicate",
+        )
+
+        absorbed = absorb_clerk_user_duplicate(
+            target,
+            duplicate_user=duplicate,
+            delete_duplicate=False,
+        )
+
+        target.refresh_from_db()
+        duplicate.refresh_from_db()
+        assert absorbed is True
+        assert target.clerk_id == "user_duplicate"
+        assert duplicate.clerk_id is None
+
+    def test_replaces_target_clerk_id_and_invalidates_both_cache_keys(self, db):
+        User = get_user_model()
+        target = User.objects.create_user(
+            email="historical@students.internal",
+            clerk_id="user_old",
+        )
+        duplicate = User.objects.create_user(
+            email="claimed@example.com",
+            clerk_id="user_new",
+        )
+        set_cached_user("user_old", target)
+        set_cached_user("user_new", duplicate)
+
+        absorbed = absorb_clerk_user_duplicate(
+            target,
+            email="claimed@example.com",
+        )
+
+        target.refresh_from_db()
+        assert absorbed is True
+        assert target.clerk_id == "user_new"
+        assert cache.get(get_user_cache_key("user_old")) is None
+        assert cache.get(get_user_cache_key("user_new")) is None
+
+    def test_refuses_to_replace_target_clerk_id_when_disabled(self, db):
+        User = get_user_model()
+        target = User.objects.create_user(
+            email="historical@students.internal",
+            clerk_id="user_old",
+        )
+        duplicate = User.objects.create_user(
+            email="claimed@example.com",
+            clerk_id="user_new",
+        )
+
+        with pytest.raises(ClerkUserMergeConflictError, match="already has Clerk ID"):
+            absorb_clerk_user_duplicate(
+                target,
+                email="claimed@example.com",
+                replace_existing_clerk_id=False,
+            )
+
+        target.refresh_from_db()
+        duplicate.refresh_from_db()
+        assert target.clerk_id == "user_old"
+        assert duplicate.clerk_id == "user_new"
+
+    def test_default_predicate_refuses_duplicate_with_password(self, db):
+        User = get_user_model()
+        target = User.objects.create_user(
+            email="historical@students.internal",
+            clerk_id=None,
+        )
+        duplicate = User.objects.create_user(
+            email="claimed@example.com",
+            clerk_id="user_claimed",
+            password="not-a-shell",
+        )
+
+        with pytest.raises(ClerkUserMergeConflictError, match="not safe"):
+            absorb_clerk_user_duplicate(target, email="claimed@example.com")
+
+        assert User.objects.filter(pk=duplicate.pk).exists()
+        target.refresh_from_db()
+        assert target.clerk_id is None
+
+    def test_app_predicate_controls_duplicate_disposal(self, db):
+        User = get_user_model()
+        target = User.objects.create_user(
+            email="historical@students.internal",
+            clerk_id=None,
+        )
+        duplicate = User.objects.create_user(
+            email="claimed@example.com",
+            clerk_id="user_claimed",
+            password="not-a-shell",
+        )
+
+        absorbed = absorb_clerk_user_duplicate(
+            target,
+            email="claimed@example.com",
+            safe_to_delete=lambda user: user.pk == duplicate.pk,
+        )
+
+        target.refresh_from_db()
+        assert absorbed is True
+        assert target.clerk_id == "user_claimed"
+        assert not User.objects.filter(pk=duplicate.pk).exists()
+
+    def test_requires_email_or_duplicate_user(self, db):
+        User = get_user_model()
+        target = User.objects.create_user(email="target@example.com")
+
+        with pytest.raises(ValueError, match="email or duplicate_user"):
+            absorb_clerk_user_duplicate(target)
 
 
 class TestGetClerkUser:

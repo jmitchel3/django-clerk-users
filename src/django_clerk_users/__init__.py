@@ -34,6 +34,37 @@ def __getattr__(name: str):
 
         return get_clerk_client
 
+    # Server-side Clerk API helpers
+    if name in (
+        "build_clerk_sign_in_url",
+        "create_clerk_sign_in_link",
+        "create_clerk_sign_in_token",
+        "create_clerk_user",
+        "derive_clerk_username",
+        "get_clerk_user_by_email",
+        "provision_clerk_user_access_link",
+        "revoke_clerk_invitation",
+        "revoke_clerk_user_sessions",
+        "send_clerk_invitation",
+        "set_clerk_user_email",
+        "update_clerk_user",
+        "update_clerk_user_public_metadata",
+    ):
+        from django_clerk_users import server_api
+
+        return getattr(server_api, name)
+
+    # Authentication
+    if name in (
+        "ClerkBackend",
+        "ClerkAuthentication",
+        "ClerkSessionAuthentication",
+        "CsrfExemptSessionAuthentication",
+    ):
+        from django_clerk_users import authentication
+
+        return getattr(authentication, name)
+
     # Exceptions
     if name in (
         "ClerkError",
@@ -43,6 +74,7 @@ def __getattr__(name: str):
         "ClerkWebhookError",
         "ClerkAPIError",
         "ClerkUserNotFoundError",
+        "ClerkUserMergeConflictError",
         "ClerkOrganizationNotFoundError",
     ):
         from django_clerk_users import exceptions
@@ -65,6 +97,7 @@ def __getattr__(name: str):
 
     # Username generation utilities (for Celery/django-qstash)
     if name in (
+        "absorb_clerk_user_duplicate",
         "generate_username_for_user",
         "generate_usernames_for_users_without",
     ):
@@ -83,6 +116,25 @@ __all__ = [
     "ClerkUserManager",
     # Client
     "get_clerk_client",
+    # Server-side Clerk API helpers
+    "build_clerk_sign_in_url",
+    "create_clerk_sign_in_link",
+    "create_clerk_sign_in_token",
+    "create_clerk_user",
+    "derive_clerk_username",
+    "get_clerk_user_by_email",
+    "provision_clerk_user_access_link",
+    "revoke_clerk_invitation",
+    "revoke_clerk_user_sessions",
+    "send_clerk_invitation",
+    "set_clerk_user_email",
+    "update_clerk_user",
+    "update_clerk_user_public_metadata",
+    # Authentication
+    "ClerkBackend",
+    "ClerkAuthentication",
+    "ClerkSessionAuthentication",
+    "CsrfExemptSessionAuthentication",
     # Exceptions
     "ClerkError",
     "ClerkConfigurationError",
@@ -91,6 +143,7 @@ __all__ = [
     "ClerkWebhookError",
     "ClerkAPIError",
     "ClerkUserNotFoundError",
+    "ClerkUserMergeConflictError",
     "ClerkOrganizationNotFoundError",
     # Testing utilities
     "ClerkTestClient",
@@ -101,6 +154,7 @@ __all__ = [
     "make_test_username",
     "TEST_OTP_CODE",
     # Username generation utilities
+    "absorb_clerk_user_duplicate",
     "generate_username_for_user",
     "generate_usernames_for_users_without",
 ]

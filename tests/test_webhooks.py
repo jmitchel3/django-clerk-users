@@ -9,7 +9,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.http import HttpResponse
-from django.test import RequestFactory
+from django.test import RequestFactory, override_settings
 
 from django_clerk_users.webhooks.handlers import (
     is_duplicate_webhook,
@@ -505,17 +505,70 @@ class TestHandleSessionEnded:
 class TestWebhookSecurity:
     """Test webhook security utilities."""
 
+    @override_settings(CLERK_WEBHOOK_SIGNING_KEY=None)
     def test_verify_webhook_no_signing_key(self):
         """Test verification fails without signing key."""
         from django_clerk_users.webhooks.security import verify_clerk_webhook
         from django_clerk_users.exceptions import ClerkWebhookError
 
-        with patch(
-            "django_clerk_users.webhooks.security.CLERK_WEBHOOK_SIGNING_KEY", None
-        ):
-            request = RequestFactory().post("/")
-            with pytest.raises(ClerkWebhookError, match="not configured"):
-                verify_clerk_webhook(request)
+        request = RequestFactory().post("/")
+        with pytest.raises(ClerkWebhookError, match="not configured"):
+            verify_clerk_webhook(request)
+
+    @override_settings(CLERK_OPTIONAL_WEBHOOK_SIGNING_KEY="")
+    def test_verify_webhook_allow_missing_signing_key(self):
+        """Test optional verification can skip when no endpoint key is configured."""
+        from django_clerk_users.webhooks.security import verify_clerk_webhook
+
+        request = RequestFactory().post("/")
+
+        assert (
+            verify_clerk_webhook(
+                request,
+                signing_key_setting="CLERK_OPTIONAL_WEBHOOK_SIGNING_KEY",
+                allow_missing=True,
+            )
+            is None
+        )
+
+    @patch("django_clerk_users.webhooks.security.Webhook")
+    def test_verify_webhook_uses_explicit_signing_key(self, mock_webhook):
+        """Test verification can use an explicit endpoint signing key."""
+        from django_clerk_users.webhooks.security import verify_clerk_webhook
+
+        mock_instance = mock_webhook.return_value
+        mock_instance.verify.return_value = {"type": "user.created"}
+        request = RequestFactory().post(
+            "/",
+            data=b'{"type": "user.created"}',
+            content_type="application/json",
+            HTTP_SVIX_ID="msg_123",
+            HTTP_SVIX_TIMESTAMP="1704067200",
+            HTTP_SVIX_SIGNATURE="sig_123",
+        )
+
+        payload = verify_clerk_webhook(request, signing_key="whsec_endpoint")
+
+        assert payload == {"type": "user.created"}
+        mock_webhook.assert_called_once_with("whsec_endpoint")
+
+    @override_settings(CLERK_ACTIVATION_WEBHOOK_SIGNING_KEY="whsec_activation")
+    @patch("django_clerk_users.webhooks.security.Webhook")
+    def test_verify_webhook_uses_endpoint_setting_name(self, mock_webhook):
+        """Test verification can read an endpoint-specific setting name."""
+        from django_clerk_users.webhooks.security import verify_clerk_webhook
+
+        mock_instance = mock_webhook.return_value
+        mock_instance.verify.return_value = {"type": "invitation.accepted"}
+        request = RequestFactory().post("/")
+
+        payload = verify_clerk_webhook(
+            request,
+            signing_key_setting="CLERK_ACTIVATION_WEBHOOK_SIGNING_KEY",
+        )
+
+        assert payload == {"type": "invitation.accepted"}
+        mock_webhook.assert_called_once_with("whsec_activation")
 
     def test_clerk_webhook_required_rejects_get(self):
         """Test decorator rejects GET requests."""
@@ -539,3 +592,21 @@ class TestWebhookSecurity:
             return HttpResponse("OK")
 
         assert my_webhook_view.__name__ == "my_webhook_view"
+
+    @patch("django_clerk_users.webhooks.security.Webhook")
+    def test_clerk_webhook_required_accepts_endpoint_signing_key(self, mock_webhook):
+        """Test decorator supports endpoint-specific signing keys."""
+        from django_clerk_users.webhooks.security import clerk_webhook_required
+
+        mock_webhook.return_value.verify.return_value = {"type": "user.created"}
+
+        @clerk_webhook_required(signing_key="whsec_endpoint")
+        def my_webhook_view(request):
+            assert request.clerk_webhook_data == {"type": "user.created"}
+            return HttpResponse("OK")
+
+        request = RequestFactory().post("/")
+        response = my_webhook_view(request)
+
+        assert response.status_code == 200
+        mock_webhook.assert_called_once_with("whsec_endpoint")

@@ -8,6 +8,7 @@ import logging
 import uuid
 from typing import Any
 
+from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 from django.utils import timezone
@@ -207,7 +208,11 @@ class AbstractClerkUser(AbstractBaseUser, PermissionsMixin):
         super().set_password(raw_password)
 
         # Sync to Clerk if enabled and user has a clerk_id
-        if sync_to_clerk and self.clerk_id and raw_password:
+        password_sync_enabled = (
+            not getattr(settings, "CLERK_DISABLE_PASSWORD_SYNC", False)
+            and getattr(settings, "CLERK_SYNC_PASSWORDS", True)
+        )
+        if sync_to_clerk and password_sync_enabled and self.clerk_id and raw_password:
             try:
                 from django_clerk_users.client import get_clerk_client
 

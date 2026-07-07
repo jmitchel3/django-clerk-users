@@ -4,8 +4,9 @@ Pytest configuration for django-clerk-users tests.
 This file loads BEFORE Django settings, allowing .env to override test defaults.
 """
 
-import os
 from pathlib import Path
+
+import pytest
 
 # Load .env file from examples directory if it exists
 # This MUST happen before Django settings are loaded
@@ -38,10 +39,6 @@ def pytest_configure(config):
         get_clerk_client.cache_clear()
     except ImportError:
         pass
-
-
-import pytest
-
 
 @pytest.fixture(autouse=True, scope="session")
 def clear_clerk_client_cache():

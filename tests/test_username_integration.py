@@ -350,7 +350,6 @@ class TestCacheWithUsername:
         """Test that username-only users are cached correctly."""
         from django_clerk_users.caching import (
             get_cached_user,
-            get_user_cache_key,
             set_cached_user,
         )
         from django_clerk_users.utils import get_clerk_user

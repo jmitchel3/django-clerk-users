@@ -27,6 +27,7 @@ class TestPackageImports:
             ClerkError,
             ClerkOrganizationNotFoundError,
             ClerkTokenError,
+            ClerkUserMergeConflictError,
             ClerkUserNotFoundError,
             ClerkWebhookError,
         )
@@ -38,16 +39,20 @@ class TestPackageImports:
         assert ClerkWebhookError
         assert ClerkAPIError
         assert ClerkUserNotFoundError
+        assert ClerkUserMergeConflictError
         assert ClerkOrganizationNotFoundError
 
     def test_import_settings(self):
         """Test that settings can be imported."""
         from django_clerk_users.settings import (
             CLERK_AUTH_PARTIES,
+            CLERK_API_TIMEOUT_MS,
             CLERK_CACHE_TIMEOUT,
+            CLERK_DISABLE_PASSWORD_SYNC,
             CLERK_FRONTEND_HOSTS,
             CLERK_SECRET_KEY,
             CLERK_SESSION_REVALIDATION_SECONDS,
+            CLERK_SYNC_PASSWORDS,
             CLERK_WEBHOOK_SIGNING_KEY,
         )
 
@@ -55,8 +60,11 @@ class TestPackageImports:
         assert CLERK_WEBHOOK_SIGNING_KEY is not None
         assert isinstance(CLERK_FRONTEND_HOSTS, list)
         assert isinstance(CLERK_AUTH_PARTIES, list)
+        assert isinstance(CLERK_API_TIMEOUT_MS, int)
         assert isinstance(CLERK_SESSION_REVALIDATION_SECONDS, int)
         assert isinstance(CLERK_CACHE_TIMEOUT, int)
+        assert isinstance(CLERK_DISABLE_PASSWORD_SYNC, bool)
+        assert isinstance(CLERK_SYNC_PASSWORDS, bool)
 
 
 class TestDjangoSetup:
@@ -123,6 +131,46 @@ class TestAuthentication:
         from django_clerk_users.authentication import ClerkBackend
 
         assert ClerkBackend
+
+    def test_import_authentication_helpers_from_package(self):
+        """Test public authentication helpers can be imported lazily."""
+        from django_clerk_users import (
+            ClerkAuthentication,
+            ClerkBackend,
+            ClerkSessionAuthentication,
+            CsrfExemptSessionAuthentication,
+        )
+
+        assert ClerkBackend
+        assert ClerkAuthentication
+        assert ClerkSessionAuthentication
+        assert CsrfExemptSessionAuthentication
+
+    def test_import_identity_adoption_helper_from_package(self):
+        """Test identity adoption helper can be imported lazily."""
+        from django_clerk_users import absorb_clerk_user_duplicate
+
+        assert absorb_clerk_user_duplicate
+
+    def test_import_server_api_helpers_from_package(self):
+        """Test public server API helpers can be imported lazily."""
+        from django_clerk_users import (
+            build_clerk_sign_in_url,
+            create_clerk_sign_in_token,
+            create_clerk_user,
+            provision_clerk_user_access_link,
+            revoke_clerk_user_sessions,
+            set_clerk_user_email,
+            update_clerk_user_public_metadata,
+        )
+
+        assert build_clerk_sign_in_url
+        assert create_clerk_sign_in_token
+        assert create_clerk_user
+        assert provision_clerk_user_access_link
+        assert revoke_clerk_user_sessions
+        assert set_clerk_user_email
+        assert update_clerk_user_public_metadata
 
     def test_import_auth_utils(self):
         """Test authentication utilities can be imported."""

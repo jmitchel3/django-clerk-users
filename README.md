@@ -2,7 +2,7 @@
 
 Integrate [Clerk](https://clerk.com) authentication with Django.
 
-> **Note:** This package is in early development (v0.0.2). APIs may change.
+> **Note:** This package is in early development (v0.3.x). APIs may change.
 
 ## Features
 
@@ -12,6 +12,7 @@ Integrate [Clerk](https://clerk.com) authentication with Django.
 - Webhook handling with Svix signature verification
 - Optional organizations support (separate sub-app)
 - Django REST Framework authentication (optional)
+- Server-side Clerk SDK helpers for account provisioning and invite links
 
 ## Installation
 
@@ -136,6 +137,20 @@ urlpatterns = [
 
 Then configure your Clerk Dashboard to send webhooks to `https://your-app.com/webhooks/clerk/`.
 
+For additional Clerk webhook endpoints, each endpoint gets its own Svix signing
+secret. Use the package verifier with an endpoint-specific setting:
+
+```python
+from django.http import JsonResponse
+from django_clerk_users.webhooks import clerk_webhook_required
+
+
+@clerk_webhook_required(signing_key_setting="CLERK_ACTIVATION_WEBHOOK_SIGNING_KEY")
+def activation_webhook(request):
+    data = request.clerk_webhook_data
+    return JsonResponse({"ok": True, "type": data.get("type")})
+```
+
 ### 8. Create admin users (for hybrid authentication)
 
 If you're using hybrid authentication, create an admin user for Django admin access:
@@ -190,6 +205,59 @@ REST_FRAMEWORK = {
 }
 ```
 
+For hybrid APIs that accept Clerk bearer tokens and Django session users, use
+the combined authenticator:
+
+```python
+# settings.py
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "django_clerk_users.authentication.ClerkSessionAuthentication",
+    ],
+}
+```
+
+`ClerkSessionAuthentication` checks `Authorization: Bearer ...` with Clerk first.
+Requests without a bearer token fall back to Django session authentication.
+Bearer token failures are not hidden by the session fallback.
+
+### Server-side Clerk operations
+
+For backend flows that create accounts outside Clerk's hosted sign-up UI, use the
+server API helpers instead of hand-writing Clerk SDK calls in each Django app:
+
+```python
+from django_clerk_users.server_api import provision_clerk_user_access_link
+
+
+result = provision_clerk_user_access_link(
+    "invitee@example.com",
+    "https://app.example.com/sign-in",
+    first_name="Ada",
+    public_metadata={"invite_type": "staff"},
+    expires_in_seconds=7 * 24 * 3600,
+    auto_username=True,  # useful when the Clerk instance requires usernames
+)
+
+if result["access_link"]:
+    send_invite_email(result["access_link"])
+```
+
+The helpers cover common server-side tasks:
+
+- `create_clerk_user()` creates passwordless or password-backed Clerk users.
+- `create_clerk_sign_in_token()` and `create_clerk_sign_in_link()` mint one-time
+  access links using Clerk's `__clerk_ticket` flow.
+- `get_clerk_user_by_email()`, `set_clerk_user_email()`, and
+  `update_clerk_user_public_metadata()` keep Django profile workflows in sync
+  with Clerk.
+- `revoke_clerk_user_sessions()`, `send_clerk_invitation()`, and
+  `revoke_clerk_invitation()` wrap common account-management operations.
+
+When `CLERK_SECRET_KEY` is missing or set to the local-dev placeholder `abc123`,
+creation helpers return `{"no_key": True}` and mutation helpers no-op with a
+falsey result.
+
 ## Hybrid Authentication (Clerk + Django Admin)
 
 The package supports hybrid authentication, allowing you to use both Clerk (JWT-based) authentication for your frontend users and traditional Django admin authentication for internal staff.
@@ -238,6 +306,43 @@ This is particularly useful when:
 - You want internal staff to access Django admin without Clerk accounts
 - You need traditional Django auth features (permissions, groups, etc.)
 - You're migrating from Django auth to Clerk gradually
+
+### Claim and conversion flows
+
+Some Django apps pre-create users before a Clerk signup exists. For example, a
+student, invitee, or imported account may later claim a real Clerk identity. If
+Clerk signs the person in before your app finishes the claim, the standard user
+sync can create a fresh duplicate user for the claimed email.
+
+Use `absorb_clerk_user_duplicate()` at the point where your app has verified the
+claim and knows the historical target user:
+
+```python
+from django_clerk_users.utils import absorb_clerk_user_duplicate
+
+
+def duplicate_is_fresh_shell(user):
+    return (
+        not user.is_staff
+        and not user.is_superuser
+        and not user.has_usable_password()
+        # Add app-specific checks here, e.g. no memberships, roles, orders, etc.
+    )
+
+
+absorb_clerk_user_duplicate(
+    target_user,
+    email=claimed_email,
+    safe_to_delete=duplicate_is_fresh_shell,
+)
+target_user.email = claimed_email
+target_user.save(update_fields=["email"])
+```
+
+The helper moves the duplicate's `clerk_id` to the target user, deletes the
+duplicate by default, and invalidates affected Clerk user cache entries. It raises
+`ClerkUserMergeConflictError` instead of deleting when the duplicate is not safe
+to absorb.
 
 ## Organizations (Optional)
 
@@ -342,6 +447,20 @@ Notes:
 - Users without a `clerk_id` (e.g., Django admin users) skip Clerk sync automatically
 - Clerk API errors are logged but don't prevent the Django password from being set
 
+Disable global password sync when Django passwords are only for local session
+users or staff accounts:
+
+```python
+# settings.py
+CLERK_SYNC_PASSWORDS = False
+```
+
+Existing projects can also use the legacy opt-out flag:
+
+```python
+CLERK_DISABLE_PASSWORD_SYNC = True
+```
+
 ## Configuration Reference
 
 | Setting | Required | Default | Description |
@@ -353,9 +472,12 @@ Notes:
 | `CLERK_SESSION_REVALIDATION_SECONDS` | No | `300` | JWT revalidation interval (seconds) |
 | `CLERK_CACHE_TIMEOUT` | No | `300` | User cache timeout (seconds) |
 | `CLERK_ORG_CACHE_TIMEOUT` | No | `900` | Organization cache timeout (seconds) |
+| `CLERK_API_TIMEOUT_MS` | No | `10000` | Timeout for server-side Clerk SDK helper calls |
 | `CLERK_WEBHOOK_DEDUP_TIMEOUT` | No | `45` | Webhook deduplication cache timeout (seconds) |
 | `CLERK_AUTO_GENERATE_USERNAME` | No | `False` | Auto-generate usernames synchronously |
 | `CLERK_AUTO_GENERATE_USERNAME_PREFIX` | No | `"user"` | Prefix for auto-generated usernames |
+| `CLERK_SYNC_PASSWORDS` | No | `True` | Sync Django password changes to Clerk when a user has `clerk_id` |
+| `CLERK_DISABLE_PASSWORD_SYNC` | No | `False` | Legacy opt-out; disables password sync when `True` |
 
 ## License
 

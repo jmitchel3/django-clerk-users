@@ -5,7 +5,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "django-clerk-users"
-version = "0.2.4"
+version = "0.3.0"
 description = "Integrate Clerk with Django"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -29,6 +29,18 @@ urls.Documentation = "https://github.com/jmitchel3/django-clerk-users"
 urls.Funding = "https://github.com/jmitchel3/django-clerk-users"
 urls.Repository = "https://github.com/jmitchel3/django-clerk-users"
 
+[tool.hatch.build.targets.sdist]
+include = [
+  "/LICENSE",
+  "/README.md",
+  "/pyproject.toml",
+  "/src",
+  "/tests",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/django_clerk_users" ]
+
 [dependency-groups]
 dev = [
   "pip>=25.3",
@@ -38,6 +50,7 @@ dev = [
   "pytest-django>=4.9",
   "python-dotenv>=1",
   "rav>=0.1.1",
+  "ruff>=0.14.1",
   "tox>=4.32",
   "tox-uv>=1.29",
 ]

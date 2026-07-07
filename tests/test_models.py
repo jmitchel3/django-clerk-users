@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 
 User = get_user_model()
 
@@ -395,6 +396,32 @@ class TestSetPassword:
 
         # Verify Clerk was NOT called
         mock_client.users.update.assert_not_called()
+
+    @override_settings(CLERK_DISABLE_PASSWORD_SYNC=True)
+    @patch("django_clerk_users.client.get_clerk_client")
+    def test_set_password_sync_disabled_by_legacy_setting(self, mock_get_client, db):
+        """Test that CLERK_DISABLE_PASSWORD_SYNC skips Clerk sync."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        user = User.objects.create(clerk_id="clerk_setting_off", email="off@test.com")
+        user.set_password("new_password123")
+
+        mock_client.users.update.assert_not_called()
+        assert user.check_password("new_password123")
+
+    @override_settings(CLERK_SYNC_PASSWORDS=False)
+    @patch("django_clerk_users.client.get_clerk_client")
+    def test_set_password_sync_disabled_by_positive_setting(self, mock_get_client, db):
+        """Test that CLERK_SYNC_PASSWORDS=False skips Clerk sync."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        user = User.objects.create(clerk_id="clerk_sync_false", email="syncfalse@test.com")
+        user.set_password("new_password123")
+
+        mock_client.users.update.assert_not_called()
+        assert user.check_password("new_password123")
 
     def test_set_password_skips_clerk_for_user_without_clerk_id(self, db):
         """Test that sync is skipped for users without a clerk_id."""

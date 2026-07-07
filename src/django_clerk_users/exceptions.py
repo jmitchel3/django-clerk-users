@@ -45,6 +45,12 @@ class ClerkUserNotFoundError(ClerkError):
     pass
 
 
+class ClerkUserMergeConflictError(ClerkError):
+    """Raised when a Clerk identity cannot be safely moved between users."""
+
+    pass
+
+
 class ClerkOrganizationNotFoundError(ClerkError):
     """Raised when a Clerk organization cannot be found."""
 

@@ -16,9 +16,19 @@ __all__ = [
 
 # Conditionally export DRF authentication if available
 try:
-    from django_clerk_users.authentication.drf import ClerkAuthentication  # noqa: F401
+    from django_clerk_users.authentication.drf import (  # noqa: F401
+        ClerkAuthentication,
+        ClerkSessionAuthentication,
+        CsrfExemptSessionAuthentication,
+    )
 
-    __all__.append("ClerkAuthentication")
+    __all__.extend(
+        [
+            "ClerkAuthentication",
+            "ClerkSessionAuthentication",
+            "CsrfExemptSessionAuthentication",
+        ]
+    )
 except ImportError:
     # DRF is not installed
     pass
