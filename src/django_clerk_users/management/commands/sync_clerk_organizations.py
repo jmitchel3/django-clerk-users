@@ -2,10 +2,12 @@
 Management command to sync organizations from Clerk to Django.
 """
 
+from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
 
 from django_clerk_users.client import get_clerk_client
 from django_clerk_users.exceptions import ClerkConfigurationError
+from django_clerk_users.utils import _clerk_list_data, _clerk_timeout_options
 
 
 class Command(BaseCommand):
@@ -41,15 +43,18 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        # Check if organizations app is installed
-        try:
-            from django_clerk_users.organizations.models import (
-                Organization,  # noqa: F401
-            )
-            from django_clerk_users.organizations.webhooks import (
-                update_or_create_organization,
-            )
-        except ImportError:
+        limit = options["limit"]
+        offset = options["offset"]
+        sync_all = options["all"]
+        sync_members = options["sync_members"]
+        dry_run = options["dry_run"]
+
+        if limit <= 0:
+            raise CommandError("--limit must be greater than zero")
+        if offset < 0:
+            raise CommandError("--offset must be zero or greater")
+
+        if not apps.is_installed("django_clerk_users.organizations"):
             self.stderr.write(
                 self.style.ERROR(
                     "Organizations app is not installed. "
@@ -58,11 +63,9 @@ class Command(BaseCommand):
             )
             return
 
-        limit = options["limit"]
-        offset = options["offset"]
-        sync_all = options["all"]
-        sync_members = options["sync_members"]
-        dry_run = options["dry_run"]
+        from django_clerk_users.organizations.webhooks import (
+            update_or_create_organization,
+        )
 
         try:
             clerk = get_clerk_client()
@@ -88,13 +91,14 @@ class Command(BaseCommand):
             )
 
             try:
-                response = clerk.organizations.list(limit=limit, offset=offset)
-                orgs = response.data if hasattr(response, "data") else response
-            except Exception as e:
-                self.stderr.write(
-                    self.style.ERROR(f"Failed to fetch organizations: {e}")
+                response = clerk.organizations.list(
+                    limit=limit,
+                    offset=offset,
+                    **_clerk_timeout_options(),
                 )
-                break
+                orgs = _clerk_list_data(response)
+            except Exception as e:
+                raise CommandError(f"Failed to fetch organizations: {e}") from e
 
             if not orgs:
                 self.stdout.write("No more organizations to sync.")
@@ -155,42 +159,58 @@ class Command(BaseCommand):
         User = get_user_model()
         clerk = get_clerk_client()
 
-        try:
-            response = clerk.organizations.get_membership_list(
-                organization_id=org_id, limit=100
-            )
-            memberships = response.data if hasattr(response, "data") else response
-        except Exception as e:
-            self.stderr.write(self.style.WARNING(f"    Failed to fetch members: {e}"))
-            return
+        limit = 100
+        offset = 0
 
-        for membership in memberships or []:
-            membership_id = getattr(membership, "id", None)
-            user_data = getattr(membership, "public_user_data", None)
-            user_id = getattr(user_data, "user_id", None) if user_data else None
-
-            if not membership_id or not user_id:
-                continue
-
-            if dry_run:
-                self.stdout.write(f"    Would sync member: {user_id}")
-                continue
-
+        while True:
             try:
-                user = User.objects.filter(clerk_id=user_id).first()
-                if not user:
-                    user, _ = update_or_create_clerk_user(user_id)
-
-                OrganizationMember.objects.update_or_create(
-                    clerk_membership_id=membership_id,
-                    defaults={
-                        "organization": organization,
-                        "user": user,
-                        "role": getattr(membership, "role", "member"),
-                    },
+                response = clerk.organization_memberships.list(
+                    organization_id=org_id,
+                    limit=limit,
+                    offset=offset,
+                    **_clerk_timeout_options(),
                 )
-                self.stdout.write(f"    Synced member: {user.email}")
+                memberships = _clerk_list_data(response)
             except Exception as e:
                 self.stderr.write(
-                    self.style.WARNING(f"    Failed to sync member {user_id}: {e}")
+                    self.style.WARNING(f"    Failed to fetch members: {e}")
                 )
+                return
+
+            if not memberships:
+                return
+
+            for membership in memberships:
+                membership_id = getattr(membership, "id", None)
+                user_data = getattr(membership, "public_user_data", None)
+                user_id = getattr(user_data, "user_id", None) if user_data else None
+
+                if not membership_id or not user_id:
+                    continue
+
+                if dry_run:
+                    self.stdout.write(f"    Would sync member: {user_id}")
+                    continue
+
+                try:
+                    user = User.objects.filter(clerk_id=user_id).first()
+                    if not user:
+                        user, _ = update_or_create_clerk_user(user_id)
+
+                    OrganizationMember.objects.update_or_create(
+                        clerk_membership_id=membership_id,
+                        defaults={
+                            "organization": organization,
+                            "user": user,
+                            "role": getattr(membership, "role", "member"),
+                        },
+                    )
+                    self.stdout.write(f"    Synced member: {user.email}")
+                except Exception as e:
+                    self.stderr.write(
+                        self.style.WARNING(f"    Failed to sync member {user_id}: {e}")
+                    )
+
+            if len(memberships) < limit:
+                return
+            offset += limit

@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from django_clerk_users.client import get_clerk_client
+from django_clerk_users.utils import _clerk_timeout_options
 
 if TYPE_CHECKING:
     from clerk_backend_api import Clerk
@@ -274,7 +275,10 @@ class ClerkTestClient:
         if phone_number:
             create_params["phone_number"] = [phone_number]
 
-        response = self.client.users.create(**create_params)
+        response = self.client.users.create(
+            **create_params,
+            **_clerk_timeout_options(),
+        )
         return TestUserData.from_clerk_response(response)
 
     def create_session(self, user_id: str) -> dict[str, Any]:
@@ -287,7 +291,10 @@ class ClerkTestClient:
         Returns:
             Session data including the session ID.
         """
-        response = self.client.sessions.create(request={"user_id": user_id})
+        response = self.client.sessions.create(
+            request={"user_id": user_id},
+            **_clerk_timeout_options(),
+        )
         if hasattr(response, "__dict__"):
             return {"id": response.id, "user_id": response.user_id}
         return response
@@ -321,7 +328,10 @@ class ClerkTestClient:
             session = self.create_session(user_id)
             session_id = session["id"]
 
-        response = self.client.sessions.create_token(session_id=session_id)
+        response = self.client.sessions.create_token(
+            session_id=session_id,
+            **_clerk_timeout_options(),
+        )
 
         if hasattr(response, "jwt"):
             return response.jwt
@@ -340,7 +350,10 @@ class ClerkTestClient:
             True if deletion was successful.
         """
         try:
-            self.client.users.delete(user_id=user_id)
+            self.client.users.delete(
+                user_id=user_id,
+                **_clerk_timeout_options(),
+            )
             return True
         except Exception:
             return False
@@ -357,7 +370,7 @@ class ClerkTestClient:
 
         See: https://clerk.com/docs/testing/testing-tokens
         """
-        response = self.client.testing_tokens.create()
+        response = self.client.testing_tokens.create(**_clerk_timeout_options())
         if hasattr(response, "token"):
             return response.token
         return response.get("token", "")

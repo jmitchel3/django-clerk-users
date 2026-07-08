@@ -8,13 +8,23 @@ Note: Passwords cannot be migrated. Users will need to reset their password
 or use OAuth/social login.
 """
 
+from collections.abc import Mapping
 from datetime import datetime
+from typing import Any
 
 from django.apps import apps
+from django.conf import settings
+from django.core.exceptions import FieldDoesNotExist
 from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
 
 from django_clerk_users.client import get_clerk_client
 from django_clerk_users.exceptions import ClerkConfigurationError
+from django_clerk_users.server_api import (
+    _duplicate_error_params,
+    _has_duplicate_identifier_error,
+)
+from django_clerk_users.utils import _clerk_list_data, _clerk_timeout_options
 
 
 class Command(BaseCommand):
@@ -51,7 +61,10 @@ class Command(BaseCommand):
             "--skip-password-email",
             action="store_true",
             default=True,
-            help="Don't trigger password reset emails (default: True)",
+            help=(
+                "Compatibility flag; migrated users are created passwordless and "
+                "no password email is sent."
+            ),
         )
         parser.add_argument(
             "--dry-run",
@@ -78,9 +91,11 @@ class Command(BaseCommand):
         migrate_all = options["all"]
         created_before = options["created_before"]
         skip_existing = options["skip_existing"]
-        _skip_password_email = options["skip_password_email"]  # noqa: F841
         dry_run = options["dry_run"]
         limit = options["limit"]
+
+        if limit <= 0:
+            raise CommandError("--limit must be greater than zero")
 
         if not email and not migrate_all and not created_before:
             raise CommandError("You must specify --email, --all, or --created-before")
@@ -99,11 +114,9 @@ class Command(BaseCommand):
         if email:
             queryset = queryset.filter(email=email)
         elif created_before:
-            try:
-                before_date = datetime.strptime(created_before, "%Y-%m-%d")
-                queryset = queryset.filter(date_joined__lt=before_date)
-            except ValueError:
-                raise CommandError("Invalid date format. Use YYYY-MM-DD")
+            before_date = self._parse_created_before(created_before)
+            created_field = self._created_before_field(SourceUser)
+            queryset = queryset.filter(**{f"{created_field}__lt": before_date})
 
         queryset = queryset[:limit]
 
@@ -136,12 +149,7 @@ class Command(BaseCommand):
             # Check if user exists in Clerk
             if skip_existing:
                 try:
-                    existing_users = clerk.users.list(email_address=[user_email])
-                    users_data = (
-                        existing_users.data
-                        if hasattr(existing_users, "data")
-                        else existing_users
-                    )
+                    users_data = self._find_existing_clerk_users(clerk, user_email)
                     if users_data:
                         if dry_run:
                             self.stdout.write(
@@ -158,11 +166,13 @@ class Command(BaseCommand):
                         skipped_count += 1
                         continue
                 except Exception as e:
+                    error_count += 1
                     self.stderr.write(
                         self.style.WARNING(
                             f"  Error checking if {user_email} exists: {e}"
                         )
                     )
+                    continue
 
             if dry_run:
                 self.stdout.write(f"  Would create: {user_email}")
@@ -176,6 +186,7 @@ class Command(BaseCommand):
                     last_name=last_name if last_name else None,
                     skip_password_requirement=True,
                     skip_password_checks=True,
+                    **_clerk_timeout_options(),
                 )
 
                 # Link Django user to Clerk
@@ -185,16 +196,26 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS(f"  Created: {user_email}"))
 
             except Exception as e:
-                error_str = str(e)
-                if (
-                    "email_address" in error_str.lower()
-                    and "taken" in error_str.lower()
-                ):
+                if self._is_duplicate_email_error(e):
                     self.stdout.write(
                         self.style.WARNING(
                             f"  Email already exists in Clerk: {user_email}"
                         )
                     )
+                    try:
+                        users_data = self._find_existing_clerk_users(clerk, user_email)
+                    except Exception as lookup_error:
+                        error_count += 1
+                        self.stderr.write(
+                            self.style.WARNING(
+                                "  Error linking existing Clerk user for "
+                                f"{user_email}: {lookup_error}"
+                            )
+                        )
+                    else:
+                        if users_data:
+                            self._link_user(source_user, users_data[0])
+                            linked_count += 1
                     skipped_count += 1
                 else:
                     error_count += 1
@@ -220,13 +241,60 @@ class Command(BaseCommand):
                 )
             )
 
+    def _find_existing_clerk_users(self, clerk, user_email: str) -> list[Any]:
+        existing_users = clerk.users.list(
+            request={"email_address": [user_email], "limit": 1},
+            **_clerk_timeout_options(),
+        )
+        return _clerk_list_data(existing_users)
+
+    @staticmethod
+    def _parse_created_before(raw_value: str) -> datetime:
+        try:
+            before_date = datetime.strptime(raw_value, "%Y-%m-%d")
+        except ValueError:
+            raise CommandError("Invalid date format. Use YYYY-MM-DD")
+
+        if settings.USE_TZ and timezone.is_naive(before_date):
+            return timezone.make_aware(before_date, timezone.get_current_timezone())
+        return before_date
+
+    @staticmethod
+    def _created_before_field(source_model) -> str:
+        for field_name in ("date_joined", "created_at"):
+            try:
+                source_model._meta.get_field(field_name)
+            except FieldDoesNotExist:
+                continue
+            return field_name
+        raise CommandError(
+            "Source model must define date_joined or created_at to use --created-before"
+        )
+
+    @staticmethod
+    def _get_clerk_value(clerk_user, key: str):
+        if isinstance(clerk_user, Mapping):
+            return clerk_user.get(key)
+        return getattr(clerk_user, key, None)
+
+    @staticmethod
+    def _is_duplicate_email_error(exc: Exception) -> bool:
+        if _has_duplicate_identifier_error(exc):
+            params = _duplicate_error_params(exc)
+            return "email_address" in params or not params
+
+        error_str = str(exc).lower()
+        return "email_address" in error_str and (
+            "taken" in error_str or "exists" in error_str or "not unique" in error_str
+        )
+
     def _link_user(self, source_user, clerk_user):
         """
         Link a Django user to their Clerk user.
 
         If the source user has a clerk_id field, update it.
         """
-        clerk_id = getattr(clerk_user, "id", None)
+        clerk_id = self._get_clerk_value(clerk_user, "id")
         if not clerk_id:
             return
 

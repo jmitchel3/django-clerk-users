@@ -54,6 +54,103 @@ def test_combined_auth_routes_bearer_token_to_clerk(monkeypatch):
     assert calls == ["clerk"]
 
 
+def test_combined_auth_routes_bearer_with_nonstandard_spacing_to_clerk(monkeypatch):
+    calls = []
+
+    class FakeClerkAuthentication:
+        def authenticate(self, request):
+            calls.append("clerk")
+            return ("clerk-user", {"sub": "user_123"})
+
+    class FakeSessionAuthentication:
+        def authenticate(self, request):
+            calls.append("session")
+            return ("session-user", None)
+
+    monkeypatch.setattr(drf, "_drf_available", True)
+    monkeypatch.setattr(
+        drf.ClerkSessionAuthentication,
+        "clerk_authentication_class",
+        FakeClerkAuthentication,
+    )
+    monkeypatch.setattr(
+        drf.ClerkSessionAuthentication,
+        "session_authentication_class",
+        FakeSessionAuthentication,
+    )
+
+    auth = drf.ClerkSessionAuthentication()
+    request = RequestFactory().get("/", HTTP_AUTHORIZATION="bearer\ttoken")
+
+    assert auth.authenticate(request) == ("clerk-user", {"sub": "user_123"})
+    assert calls == ["clerk"]
+
+
+def test_combined_auth_routes_bearer_bytes_header_to_clerk(monkeypatch):
+    calls = []
+
+    class FakeClerkAuthentication:
+        def authenticate(self, request):
+            calls.append("clerk")
+            return ("clerk-user", {"sub": "user_123"})
+
+    class FakeSessionAuthentication:
+        def authenticate(self, request):
+            calls.append("session")
+            return ("session-user", None)
+
+    monkeypatch.setattr(drf, "_drf_available", True)
+    monkeypatch.setattr(
+        drf.ClerkSessionAuthentication,
+        "clerk_authentication_class",
+        FakeClerkAuthentication,
+    )
+    monkeypatch.setattr(
+        drf.ClerkSessionAuthentication,
+        "session_authentication_class",
+        FakeSessionAuthentication,
+    )
+
+    auth = drf.ClerkSessionAuthentication()
+    request = RequestFactory().get("/")
+    request.META["HTTP_AUTHORIZATION"] = b"Bearer token"
+
+    assert auth.authenticate(request) == ("clerk-user", {"sub": "user_123"})
+    assert calls == ["clerk"]
+
+
+def test_combined_auth_routes_non_bearer_authorization_to_session(monkeypatch):
+    calls = []
+
+    class FakeClerkAuthentication:
+        def authenticate(self, request):
+            calls.append("clerk")
+            return ("clerk-user", {"sub": "user_123"})
+
+    class FakeSessionAuthentication:
+        def authenticate(self, request):
+            calls.append("session")
+            return ("session-user", None)
+
+    monkeypatch.setattr(drf, "_drf_available", True)
+    monkeypatch.setattr(
+        drf.ClerkSessionAuthentication,
+        "clerk_authentication_class",
+        FakeClerkAuthentication,
+    )
+    monkeypatch.setattr(
+        drf.ClerkSessionAuthentication,
+        "session_authentication_class",
+        FakeSessionAuthentication,
+    )
+
+    auth = drf.ClerkSessionAuthentication()
+    request = RequestFactory().get("/", HTTP_AUTHORIZATION="Basic token")
+
+    assert auth.authenticate(request) == ("session-user", None)
+    assert calls == ["session"]
+
+
 def test_combined_auth_routes_missing_bearer_token_to_session(monkeypatch):
     calls = []
 

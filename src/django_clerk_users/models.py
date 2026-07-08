@@ -8,7 +8,6 @@ import logging
 import uuid
 from typing import Any
 
-from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 from django.utils import timezone
@@ -38,7 +37,7 @@ class AbstractClerkUser(AbstractBaseUser, PermissionsMixin):
     uid = models.UUIDField(
         default=uuid.uuid4,
         editable=False,
-        db_index=True,
+        unique=True,
         help_text="Public unique identifier for the user.",
     )
 
@@ -130,10 +129,6 @@ class AbstractClerkUser(AbstractBaseUser, PermissionsMixin):
         abstract = True
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["clerk_id"]),
-            models.Index(fields=["email"]),
-            models.Index(fields=["username"]),
-            models.Index(fields=["uid"]),
             models.Index(fields=["is_active"]),
         ]
 
@@ -186,7 +181,9 @@ class AbstractClerkUser(AbstractBaseUser, PermissionsMixin):
             return True
         return super().has_module_perms(app_label)
 
-    def set_password(self, raw_password: str | None, sync_to_clerk: bool = True) -> None:
+    def set_password(
+        self, raw_password: str | None, sync_to_clerk: bool = True
+    ) -> None:
         """
         Set the user's password, optionally syncing to Clerk.
 
@@ -208,19 +205,28 @@ class AbstractClerkUser(AbstractBaseUser, PermissionsMixin):
         super().set_password(raw_password)
 
         # Sync to Clerk if enabled and user has a clerk_id
-        password_sync_enabled = (
-            not getattr(settings, "CLERK_DISABLE_PASSWORD_SYNC", False)
-            and getattr(settings, "CLERK_SYNC_PASSWORDS", True)
+        from django_clerk_users.settings import _bool_setting
+
+        password_sync_disabled = _bool_setting("CLERK_DISABLE_PASSWORD_SYNC", False)
+        password_sync_enabled = not password_sync_disabled and _bool_setting(
+            "CLERK_SYNC_PASSWORDS", not password_sync_disabled
         )
         if sync_to_clerk and password_sync_enabled and self.clerk_id and raw_password:
             try:
                 from django_clerk_users.client import get_clerk_client
+                from django_clerk_users.utils import _clerk_timeout_options
 
                 clerk = get_clerk_client()
-                clerk.users.update(user_id=self.clerk_id, password=raw_password)
+                clerk.users.update(
+                    user_id=self.clerk_id,
+                    password=raw_password,
+                    **_clerk_timeout_options(),
+                )
                 logger.info(f"Synced password to Clerk for user {self.clerk_id}")
             except Exception as e:
-                logger.error(f"Failed to sync password to Clerk for user {self.clerk_id}: {e}")
+                logger.error(
+                    f"Failed to sync password to Clerk for user {self.clerk_id}: {e}"
+                )
 
 
 class ClerkUser(AbstractClerkUser):

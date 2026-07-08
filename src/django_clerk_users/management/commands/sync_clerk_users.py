@@ -6,7 +6,11 @@ from django.core.management.base import BaseCommand, CommandError
 
 from django_clerk_users.client import get_clerk_client
 from django_clerk_users.exceptions import ClerkConfigurationError
-from django_clerk_users.utils import update_or_create_clerk_user
+from django_clerk_users.utils import (
+    _clerk_list_data,
+    _clerk_timeout_options,
+    update_or_create_clerk_user,
+)
 
 
 class Command(BaseCommand):
@@ -42,6 +46,11 @@ class Command(BaseCommand):
         sync_all = options["all"]
         dry_run = options["dry_run"]
 
+        if limit <= 0:
+            raise CommandError("--limit must be greater than zero")
+        if offset < 0:
+            raise CommandError("--offset must be zero or greater")
+
         try:
             clerk = get_clerk_client()
         except ClerkConfigurationError:
@@ -64,11 +73,13 @@ class Command(BaseCommand):
             self.stdout.write(f"Fetching users (offset={offset}, limit={limit})...")
 
             try:
-                response = clerk.users.list(limit=limit, offset=offset)
-                users = response.data if hasattr(response, "data") else response
+                response = clerk.users.list(
+                    request={"limit": limit, "offset": offset},
+                    **_clerk_timeout_options(),
+                )
+                users = _clerk_list_data(response)
             except Exception as e:
-                self.stderr.write(self.style.ERROR(f"Failed to fetch users: {e}"))
-                break
+                raise CommandError(f"Failed to fetch users: {e}") from e
 
             if not users:
                 self.stdout.write("No more users to sync.")

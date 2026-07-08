@@ -27,7 +27,7 @@ class Organization(models.Model):
     uid = models.UUIDField(
         default=uuid.uuid4,
         editable=False,
-        db_index=True,
+        unique=True,
         help_text="Public unique identifier for the organization.",
     )
 
@@ -101,11 +101,6 @@ class Organization(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["clerk_id"]),
-            models.Index(fields=["slug"]),
-            models.Index(fields=["is_active"]),
-        ]
         verbose_name = "Organization"
         verbose_name_plural = "Organizations"
 

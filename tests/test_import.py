@@ -2,6 +2,11 @@
 Basic tests for django-clerk-users package.
 """
 
+import os
+from pathlib import Path
+
+import pytest
+
 
 class TestPackageImports:
     """Test that package imports work correctly."""
@@ -11,6 +16,19 @@ class TestPackageImports:
         import django_clerk_users
 
         assert django_clerk_users.__version__
+
+    def test_tox_imports_installed_package_not_checkout_source(self):
+        """Test tox wheel environments do not import from the checkout src tree."""
+        if os.environ.get("DJANGO_CLERK_USERS_REQUIRE_WHEEL_IMPORT") != "1":
+            pytest.skip("Only enforced in tox wheel environments.")
+
+        import django_clerk_users
+
+        package_file = Path(django_clerk_users.__file__).resolve()
+        src_root = Path(__file__).resolve().parents[1] / "src"
+
+        with pytest.raises(ValueError):
+            package_file.relative_to(src_root)
 
     def test_import_version(self):
         """Test that version is accessible."""
@@ -47,6 +65,7 @@ class TestPackageImports:
         from django_clerk_users.settings import (
             CLERK_AUTH_PARTIES,
             CLERK_API_TIMEOUT_MS,
+            CLERK_AUTO_GENERATE_USERNAME,
             CLERK_CACHE_TIMEOUT,
             CLERK_DISABLE_PASSWORD_SYNC,
             CLERK_FRONTEND_HOSTS,
@@ -63,8 +82,33 @@ class TestPackageImports:
         assert isinstance(CLERK_API_TIMEOUT_MS, int)
         assert isinstance(CLERK_SESSION_REVALIDATION_SECONDS, int)
         assert isinstance(CLERK_CACHE_TIMEOUT, int)
+        assert isinstance(CLERK_AUTO_GENERATE_USERNAME, bool)
         assert isinstance(CLERK_DISABLE_PASSWORD_SYNC, bool)
         assert isinstance(CLERK_SYNC_PASSWORDS, bool)
+
+    def test_settings_helpers_coerce_environment_strings(self, settings):
+        """Test exported config helpers match common environment string shapes."""
+        from django_clerk_users.settings import (
+            _bool_setting,
+            _coerce_bool,
+            _int_setting,
+            _string_list,
+        )
+
+        settings.CLERK_API_TIMEOUT_MS = "2500"
+        settings.CLERK_AUTO_GENERATE_USERNAME = "true"
+        settings.CLERK_SYNC_PASSWORDS = "false"
+
+        assert _int_setting("CLERK_API_TIMEOUT_MS", 10_000, minimum=1) == 2500
+        assert _int_setting("CLERK_API_TIMEOUT_MS", 10_000, minimum=3000) == 10_000
+        assert _string_list(["https://app.example.com", b"\xff"]) == [
+            "https://app.example.com"
+        ]
+        assert _bool_setting("CLERK_AUTO_GENERATE_USERNAME", False) is True
+        assert _bool_setting("CLERK_SYNC_PASSWORDS", True) is False
+        assert _coerce_bool("yes", False) is True
+        assert _coerce_bool(b"\xff", True) is True
+        assert _coerce_bool("", True) is True
 
 
 class TestDjangoSetup:

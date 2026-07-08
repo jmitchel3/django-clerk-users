@@ -5,7 +5,7 @@ Webhook views for Clerk events.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.http import HttpResponse, JsonResponse
 
@@ -49,31 +49,65 @@ def clerk_webhook_view(request: HttpRequest) -> HttpResponse:
         403 Forbidden on signature verification failure
     """
     data = request.clerk_webhook_data  # type: ignore
+    if not isinstance(data, dict):
+        logger.warning("Webhook received invalid payload type: %s", type(data).__name__)
+        return JsonResponse({"error": "Invalid payload"}, status=400)
 
     # Extract event metadata
     event_type = data.get("type")
     event_data = data.get("data", {})
     event_id = data.get("id", "")
+    svix_id = request.headers.get("svix-id", "")
 
     if not event_type:
         logger.warning("Webhook received without event type")
         return JsonResponse({"error": "Missing event type"}, status=400)
 
-    # Check for duplicate webhook
-    instance_id = event_data.get("id", event_id)
-    if is_duplicate_webhook(event_type, instance_id):
-        logger.debug(f"Duplicate webhook ignored: {event_type} {instance_id}")
-        return HttpResponse("OK (duplicate)", status=200)
+    if not isinstance(event_type, str):
+        logger.warning("Webhook received invalid event type: %r", event_type)
+        return JsonResponse({"error": "Invalid event type"}, status=400)
 
-    logger.info(f"Processing webhook: {event_type}")
+    if event_data is None:
+        event_data = {}
+    if not isinstance(event_data, dict):
+        logger.warning(
+            "Webhook %s received invalid event data type: %s",
+            event_type,
+            type(event_data).__name__,
+        )
+        return JsonResponse({"error": "Invalid event data"}, status=400)
+
+    # Check for duplicate webhook
+    instance_id = _get_webhook_instance_id(event_id, svix_id)
+    if instance_id:
+        if is_duplicate_webhook(event_type, instance_id):
+            logger.debug("Duplicate webhook ignored: %s %s", event_type, instance_id)
+            return HttpResponse("OK (duplicate)", status=200)
+
+    logger.info("Processing webhook: %s", event_type)
 
     # Process the event
-    success = process_webhook_event(event_type, event_data)
+    try:
+        success = process_webhook_event(event_type, event_data)
+    except Exception:
+        logger.exception("Webhook processing raised unexpectedly: %s", event_type)
+        success = False
 
     if success:
         return HttpResponse("OK", status=200)
     else:
         # Return 200 anyway to prevent Clerk from retrying
         # Log the error for monitoring
-        logger.error(f"Webhook processing failed: {event_type}")
+        logger.error("Webhook processing failed: %s", event_type)
         return HttpResponse("OK (processing failed)", status=200)
+
+
+def _get_webhook_instance_id(event_id: Any, svix_id: Any = "") -> str:
+    """Return a webhook event/message ID suitable for idempotency."""
+    for instance_id in (event_id, svix_id):
+        if instance_id is None:
+            continue
+        instance_id = str(instance_id)
+        if instance_id:
+            return instance_id
+    return ""

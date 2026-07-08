@@ -16,31 +16,55 @@ from django.views.decorators.csrf import csrf_exempt
 from svix.webhooks import Webhook, WebhookVerificationError
 
 from django_clerk_users.exceptions import ClerkWebhookError
-from django_clerk_users.settings import CLERK_WEBHOOK_SIGNING_KEY
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
 
 logger = logging.getLogger(__name__)
 
+WEBHOOK_SIGNING_KEY_SENTINELS = {
+    "whsec_test_mock_signing_key",
+    "whsec_replace_me",
+}
+
+
+def _normalize_webhook_signing_key(signing_key: Any) -> str | None:
+    if signing_key is None:
+        return None
+    if isinstance(signing_key, bytes):
+        try:
+            signing_key = signing_key.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    if not isinstance(signing_key, str):
+        return None
+
+    signing_key = signing_key.strip()
+    if (
+        not signing_key
+        or not signing_key.startswith("whsec_")
+        or signing_key in WEBHOOK_SIGNING_KEY_SENTINELS
+    ):
+        return None
+    return signing_key
+
 
 def _get_webhook_signing_key(
-    signing_key: str | None,
+    signing_key: str | bytes | None,
     signing_key_setting: str,
 ) -> str | None:
     if signing_key is not None:
-        return signing_key
+        resolved_signing_key = signing_key
+    else:
+        resolved_signing_key = getattr(settings, signing_key_setting, None)
 
-    if signing_key_setting == "CLERK_WEBHOOK_SIGNING_KEY":
-        return getattr(settings, signing_key_setting, CLERK_WEBHOOK_SIGNING_KEY)
-
-    return getattr(settings, signing_key_setting, None)
+    return _normalize_webhook_signing_key(resolved_signing_key)
 
 
 def verify_clerk_webhook(
     request: HttpRequest,
     *,
-    signing_key: str | None = None,
+    signing_key: str | bytes | None = None,
     signing_key_setting: str = "CLERK_WEBHOOK_SIGNING_KEY",
     allow_missing: bool = False,
 ) -> dict[str, Any] | None:
@@ -96,7 +120,7 @@ def verify_clerk_webhook(
 def clerk_webhook_required(
     view_func: Callable | None = None,
     *,
-    signing_key: str | None = None,
+    signing_key: str | bytes | None = None,
     signing_key_setting: str = "CLERK_WEBHOOK_SIGNING_KEY",
     allow_missing: bool = False,
 ) -> Callable:

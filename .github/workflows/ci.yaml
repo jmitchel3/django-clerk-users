@@ -8,18 +8,32 @@ on:
     paths:
     - 'src/**'
     - 'tests/**'
+    - 'scripts/**'
+    - '.env.example'
+    - 'CHANGELOG.md'
+    - 'LICENSE'
+    - 'README.md'
     - 'pyproject.toml'
     - 'tox.ini'
     - 'uv.lock'
     - '.github/workflows/ci.yaml'
+    - '.github/workflows/live-smoke.yaml'
+    - '.github/workflows/release.yaml'
   pull_request:
     paths:
     - 'src/**'
     - 'tests/**'
+    - 'scripts/**'
+    - '.env.example'
+    - 'CHANGELOG.md'
+    - 'LICENSE'
+    - 'README.md'
     - 'pyproject.toml'
     - 'tox.ini'
     - 'uv.lock'
     - '.github/workflows/ci.yaml'
+    - '.github/workflows/live-smoke.yaml'
+    - '.github/workflows/release.yaml'
 
 concurrency:
   group: ${{ github.head_ref || github.run_id }}
@@ -46,13 +60,33 @@ jobs:
     - name: Install dependencies
       run: uv sync --group dev --frozen
 
+    - name: Check lockfile
+      run: uv lock --check
+
+    - name: Check dependency consistency
+      run: uv run python -m pip check
+
     - name: Run Ruff
       run: uv run ruff check .
+
+    - name: Check formatting
+      run: uv run ruff format --check .
 
     - name: Check migrations
       env:
         DJANGO_SETTINGS_MODULE: tests.settings
       run: uv run python -m django makemigrations --check --dry-run
+
+    - name: Build package
+      run: uv build
+
+    - name: Check distribution artifacts
+      run: uv run python scripts/check_dist.py
+
+    - name: Smoke test installed wheel
+      run: |
+        uv run --no-sync python -m pip install --force-reinstall --no-deps dist/django_clerk_users-*.whl
+        uv run --no-sync python scripts/smoke_installed_wheel.py
 
   tests:
     name: Python ${{ matrix.python-version }}
@@ -80,10 +114,10 @@ jobs:
         cache-dependency-glob: uv.lock
 
     - name: Install dependencies
-      run: uv pip install --system tox tox-uv
+      run: uv sync --group dev --frozen
 
     - name: Run tox targets for ${{ matrix.python-version }}
-      run: tox run -f py$(echo ${{ matrix.python-version }} | tr -d .)
+      run: uv run tox run -f py$(echo ${{ matrix.python-version }} | tr -d .)
 
     - name: Upload coverage data
       uses: actions/upload-artifact@v4
@@ -108,7 +142,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: uv pip install --system coverage[toml]
+        run: uv sync --group dev --frozen
 
       - name: Download data
         uses: actions/download-artifact@v4
@@ -117,14 +151,13 @@ jobs:
           pattern: coverage-data-*
           merge-multiple: true
 
-      - name: Combine coverage and fail if it's <100%
+      - name: Combine coverage and enforce threshold
         run: |
-          python -m coverage combine
-          python -m coverage html --skip-covered --skip-empty
-          python -m coverage report --fail-under=100
+          uv run coverage combine
+          uv run coverage html --skip-covered --skip-empty
           echo "## Coverage summary" >> $GITHUB_STEP_SUMMARY
-          python -m coverage report --format=markdown >> $GITHUB_STEP_SUMMARY
-        continue-on-error: true
+          uv run coverage report --format=markdown --fail-under=0 >> $GITHUB_STEP_SUMMARY
+          uv run coverage report
 
       - name: Upload HTML report
         if: ${{ failure() }}

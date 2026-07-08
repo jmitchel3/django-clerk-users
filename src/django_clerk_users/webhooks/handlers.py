@@ -8,10 +8,10 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
 
-from django_clerk_users.settings import CLERK_WEBHOOK_DEDUP_TIMEOUT
 from django_clerk_users.webhooks.signals import (
     clerk_session_created,
     clerk_session_ended,
@@ -24,6 +24,32 @@ if TYPE_CHECKING:
     from django_clerk_users.models import AbstractClerkUser
 
 logger = logging.getLogger(__name__)
+DEFAULT_WEBHOOK_DEDUP_TIMEOUT = 45
+
+
+def _get_webhook_dedup_timeout() -> int:
+    raw_timeout = getattr(
+        settings,
+        "CLERK_WEBHOOK_DEDUP_TIMEOUT",
+        DEFAULT_WEBHOOK_DEDUP_TIMEOUT,
+    )
+    try:
+        timeout = int(raw_timeout)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid CLERK_WEBHOOK_DEDUP_TIMEOUT value %r, using default %s",
+            raw_timeout,
+            DEFAULT_WEBHOOK_DEDUP_TIMEOUT,
+        )
+        return DEFAULT_WEBHOOK_DEDUP_TIMEOUT
+    if timeout <= 0:
+        logger.warning(
+            "Non-positive CLERK_WEBHOOK_DEDUP_TIMEOUT value %r, using default %s",
+            raw_timeout,
+            DEFAULT_WEBHOOK_DEDUP_TIMEOUT,
+        )
+        return DEFAULT_WEBHOOK_DEDUP_TIMEOUT
+    return timeout
 
 
 def parse_clerk_timestamp(timestamp: int | str | datetime | None) -> datetime | None:
@@ -81,10 +107,8 @@ def is_duplicate_webhook(event_type: str, instance_id: str) -> bool:
         True if this is a duplicate, False otherwise.
     """
     cache_key = f"webhook:{event_type}:{instance_id}"
-    if cache.get(cache_key):
-        return True
-    cache.set(cache_key, True, timeout=CLERK_WEBHOOK_DEDUP_TIMEOUT)
-    return False
+    timeout = _get_webhook_dedup_timeout()
+    return not cache.add(cache_key, True, timeout=timeout)
 
 
 @transaction.atomic
@@ -219,7 +243,7 @@ def handle_user_deleted(data: dict[str, Any]) -> AbstractClerkUser | None:
 
 
 @transaction.atomic
-def handle_session_created(data: dict[str, Any]) -> None:
+def handle_session_created(data: dict[str, Any]) -> bool:
     """
     Handle session.created webhook event.
 
@@ -235,13 +259,13 @@ def handle_session_created(data: dict[str, Any]) -> None:
     user_id = data.get("user_id")
     if not user_id:
         logger.error("session.created webhook missing user_id")
-        return
+        return False
 
     try:
         user = User.objects.filter(clerk_id=user_id).first()
         if not user:
             logger.debug(f"User not found for session.created: {user_id}")
-            return
+            return True
 
         # Update last_login
         user.last_login = parse_clerk_timestamp(data.get("created_at"))
@@ -254,12 +278,15 @@ def handle_session_created(data: dict[str, Any]) -> None:
             clerk_data=data,
         )
 
+        return True
+
     except Exception as e:
         logger.error(f"Failed to handle session.created: {e}")
+        return False
 
 
 @transaction.atomic
-def handle_session_ended(data: dict[str, Any]) -> None:
+def handle_session_ended(data: dict[str, Any]) -> bool:
     """
     Handle session.ended/removed/revoked webhook events.
 
@@ -275,13 +302,13 @@ def handle_session_ended(data: dict[str, Any]) -> None:
     user_id = data.get("user_id")
     if not user_id:
         logger.error("session.ended webhook missing user_id")
-        return
+        return False
 
     try:
         user = User.objects.filter(clerk_id=user_id).first()
         if not user:
             logger.debug(f"User not found for session.ended: {user_id}")
-            return
+            return True
 
         # Update last_logout
         user.last_logout = parse_clerk_timestamp(
@@ -296,8 +323,11 @@ def handle_session_ended(data: dict[str, Any]) -> None:
             clerk_data=data,
         )
 
+        return True
+
     except Exception as e:
         logger.error(f"Failed to handle session.ended: {e}")
+        return False
 
 
 def process_webhook_event(event_type: str, data: dict[str, Any]) -> bool:
@@ -314,21 +344,30 @@ def process_webhook_event(event_type: str, data: dict[str, Any]) -> bool:
     Returns:
         True if the event was handled successfully, False otherwise.
     """
-    handlers = {
+    user_handlers = {
         "user.created": handle_user_created,
         "user.updated": handle_user_updated,
         "user.deleted": handle_user_deleted,
+    }
+    session_handlers = {
         "session.created": handle_session_created,
         "session.ended": handle_session_ended,
         "session.removed": handle_session_ended,
         "session.revoked": handle_session_ended,
     }
 
-    handler = handlers.get(event_type)
+    handler = user_handlers.get(event_type)
     if handler:
         try:
-            handler(data)
-            return True
+            return handler(data) is not None
+        except Exception as e:
+            logger.error(f"Error handling {event_type}: {e}")
+            return False
+
+    handler = session_handlers.get(event_type)
+    if handler:
+        try:
+            return handler(data) is not False
         except Exception as e:
             logger.error(f"Error handling {event_type}: {e}")
             return False

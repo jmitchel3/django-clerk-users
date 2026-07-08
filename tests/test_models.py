@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 from django.test import override_settings
 
 User = get_user_model()
@@ -192,6 +193,17 @@ class TestClerkUserModel:
     def test_user_uid_is_uuid(self, clerk_user):
         """Test that uid is a valid UUID."""
         assert isinstance(clerk_user.uid, uuid.UUID)
+
+    def test_user_uid_unique_constraint(self, clerk_user, db):
+        """Test that public user IDs are database-unique."""
+        User = get_user_model()
+
+        with pytest.raises(IntegrityError):
+            User.objects.create_user(
+                clerk_id="user_duplicate_uid",
+                email="duplicate-uid@example.com",
+                uid=clerk_user.uid,
+            )
 
     def test_user_public_id(self, clerk_user):
         """Test public_id property."""
@@ -382,7 +394,9 @@ class TestSetPassword:
 
         # Verify Clerk was called
         mock_client.users.update.assert_called_once_with(
-            user_id="clerk_password_test", password="new_password123"
+            user_id="clerk_password_test",
+            password="new_password123",
+            timeout_ms=10000,
         )
 
     @patch("django_clerk_users.client.get_clerk_client")
@@ -391,7 +405,9 @@ class TestSetPassword:
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
 
-        user = User.objects.create(clerk_id="clerk_no_sync_test", email="nosync@test.com")
+        user = User.objects.create(
+            clerk_id="clerk_no_sync_test", email="nosync@test.com"
+        )
         user.set_password("new_password123", sync_to_clerk=False)
 
         # Verify Clerk was NOT called
@@ -417,7 +433,43 @@ class TestSetPassword:
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
 
-        user = User.objects.create(clerk_id="clerk_sync_false", email="syncfalse@test.com")
+        user = User.objects.create(
+            clerk_id="clerk_sync_false", email="syncfalse@test.com"
+        )
+        user.set_password("new_password123")
+
+        mock_client.users.update.assert_not_called()
+        assert user.check_password("new_password123")
+
+    @override_settings(CLERK_DISABLE_PASSWORD_SYNC="true")
+    @patch("django_clerk_users.client.get_clerk_client")
+    def test_set_password_sync_disabled_by_string_legacy_setting(
+        self, mock_get_client, db
+    ):
+        """Test string CLERK_DISABLE_PASSWORD_SYNC values skip Clerk sync."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        user = User.objects.create(
+            clerk_id="clerk_string_disable", email="stringdisable@test.com"
+        )
+        user.set_password("new_password123")
+
+        mock_client.users.update.assert_not_called()
+        assert user.check_password("new_password123")
+
+    @override_settings(CLERK_SYNC_PASSWORDS="false")
+    @patch("django_clerk_users.client.get_clerk_client")
+    def test_set_password_sync_disabled_by_string_positive_setting(
+        self, mock_get_client, db
+    ):
+        """Test string CLERK_SYNC_PASSWORDS=false skips Clerk sync."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        user = User.objects.create(
+            clerk_id="clerk_string_sync_false", email="stringsyncfalse@test.com"
+        )
         user.set_password("new_password123")
 
         mock_client.users.update.assert_not_called()

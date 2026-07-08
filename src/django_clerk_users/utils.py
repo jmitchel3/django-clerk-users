@@ -5,7 +5,11 @@ Core utilities for django-clerk-users.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Callable
+
+from django.conf import settings
+from django.db import IntegrityError, transaction
 
 from django_clerk_users.caching import (
     get_cached_user,
@@ -18,11 +22,59 @@ from django_clerk_users.exceptions import (
     ClerkUserMergeConflictError,
     ClerkUserNotFoundError,
 )
+from django_clerk_users.settings import _coerce_bool
 
 if TYPE_CHECKING:
     from django_clerk_users.models import AbstractClerkUser
 
 logger = logging.getLogger(__name__)
+CLERK_API_DEFAULT_TIMEOUT_MS = 10_000
+
+
+class _ClerkIdCreateRace(Exception):
+    """Raised when local Clerk user creation may have lost a concurrent race."""
+
+
+def _auto_generate_username_enabled() -> bool:
+    return _coerce_bool(getattr(settings, "CLERK_AUTO_GENERATE_USERNAME", False), False)
+
+
+def _clerk_timeout_options() -> dict[str, int]:
+    raw_timeout = getattr(
+        settings, "CLERK_API_TIMEOUT_MS", CLERK_API_DEFAULT_TIMEOUT_MS
+    )
+    try:
+        timeout_ms = int(raw_timeout)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid CLERK_API_TIMEOUT_MS value %r, using default %s",
+            raw_timeout,
+            CLERK_API_DEFAULT_TIMEOUT_MS,
+        )
+        timeout_ms = CLERK_API_DEFAULT_TIMEOUT_MS
+
+    if timeout_ms <= 0:
+        logger.warning(
+            "Non-positive CLERK_API_TIMEOUT_MS value %r, using default %s",
+            raw_timeout,
+            CLERK_API_DEFAULT_TIMEOUT_MS,
+        )
+        timeout_ms = CLERK_API_DEFAULT_TIMEOUT_MS
+
+    return {"timeout_ms": timeout_ms}
+
+
+def _clerk_list_data(response: Any) -> list[Any]:
+    """Return list endpoint data for both SDK pagination objects and lists."""
+    if response is None:
+        return []
+    if isinstance(response, Mapping):
+        data = response.get("data", response)
+    else:
+        data = getattr(response, "data", response)
+    if data is None:
+        return []
+    return list(data)
 
 
 def _default_duplicate_is_disposable(user: AbstractClerkUser) -> bool:
@@ -78,7 +130,6 @@ def absorb_clerk_user_duplicate(
         raise ValueError("email or duplicate_user is required")
 
     from django.contrib.auth import get_user_model
-    from django.db import transaction
 
     User = get_user_model()
 
@@ -156,6 +207,60 @@ def absorb_clerk_user_duplicate(
     return True
 
 
+def _upsert_local_clerk_user(
+    User: Any,
+    clerk_user_id: str,
+    *,
+    primary_email: str | None,
+    username: str | None,
+    user_data: dict[str, Any],
+) -> tuple[AbstractClerkUser, bool]:
+    """Create, update, or link the local Django user for a Clerk identity."""
+    user = User.objects.select_for_update().filter(clerk_id=clerk_user_id).first()
+    created = False
+
+    if user:
+        for key, value in user_data.items():
+            setattr(user, key, value)
+        user.email = primary_email
+        user.username = username
+        user.save()
+        return user, created
+
+    existing_user = None
+    if primary_email:
+        existing_user = (
+            User.objects.select_for_update().filter(email__iexact=primary_email).first()
+        )
+    if not existing_user and username:
+        existing_user = (
+            User.objects.select_for_update().filter(username=username).first()
+        )
+
+    if existing_user:
+        existing_user.clerk_id = clerk_user_id
+        existing_user.email = primary_email
+        existing_user.username = username
+        for key, value in user_data.items():
+            setattr(existing_user, key, value)
+        existing_user.save()
+        identifier = primary_email or username or clerk_user_id
+        logger.info("Linked existing user %s to Clerk ID %s", identifier, clerk_user_id)
+        return existing_user, created
+
+    try:
+        user = User.objects.create(
+            clerk_id=clerk_user_id,
+            email=primary_email,
+            username=username,
+            **user_data,
+        )
+    except IntegrityError as exc:
+        raise _ClerkIdCreateRace from exc
+    created = True
+    return user, created
+
+
 def update_or_create_clerk_user(
     clerk_user_id: str,
 ) -> tuple[AbstractClerkUser, bool]:
@@ -185,7 +290,10 @@ def update_or_create_clerk_user(
     try:
         # Fetch user from Clerk API
         clerk = get_clerk_client()
-        clerk_user = clerk.users.get(user_id=clerk_user_id)
+        clerk_user = clerk.users.get(
+            user_id=clerk_user_id,
+            **_clerk_timeout_options(),
+        )
 
         if not clerk_user:
             raise ClerkUserNotFoundError(f"User not found in Clerk: {clerk_user_id}")
@@ -207,9 +315,7 @@ def update_or_create_clerk_user(
 
         # Auto-generate username if enabled and user doesn't have one
         if username is None:
-            from django_clerk_users.settings import CLERK_AUTO_GENERATE_USERNAME
-
-            if CLERK_AUTO_GENERATE_USERNAME:
+            if _auto_generate_username_enabled():
                 username = User.objects.generate_unique_username()
 
         # Note: Both email and username can be null - clerk_id is the only required identifier
@@ -221,51 +327,24 @@ def update_or_create_clerk_user(
             "image_url": getattr(clerk_user, "image_url", "") or "",
         }
 
-        # First, try to find by clerk_id
-        user = User.objects.filter(clerk_id=clerk_user_id).first()
-        created = False
-
-        if user:
-            # Update existing Clerk-linked user
-            for key, value in user_data.items():
-                setattr(user, key, value)
-            user.email = primary_email
-            user.username = username
-            user.save()
-        else:
-            # No user with this clerk_id - try to find by email or username
-            existing_user = None
-
-            # Try email first (if present)
-            if primary_email:
-                existing_user = User.objects.filter(email__iexact=primary_email).first()
-
-            # Try username if no match by email (and username is present)
-            if not existing_user and username:
-                existing_user = User.objects.filter(username=username).first()
-
-            if existing_user:
-                # Link existing Django user to Clerk
-                existing_user.clerk_id = clerk_user_id
-                existing_user.email = primary_email
-                existing_user.username = username
-                for key, value in user_data.items():
-                    setattr(existing_user, key, value)
-                existing_user.save()
-                user = existing_user
-                identifier = primary_email or username or clerk_user_id
-                logger.info(
-                    f"Linked existing user {identifier} to Clerk ID {clerk_user_id}"
-                )
-            else:
-                # Create new user
-                user = User.objects.create(
-                    clerk_id=clerk_user_id,
-                    email=primary_email,
+        try:
+            with transaction.atomic():
+                user, created = _upsert_local_clerk_user(
+                    User,
+                    clerk_user_id,
+                    primary_email=primary_email,
                     username=username,
-                    **user_data,
+                    user_data=user_data,
                 )
-                created = True
+        except _ClerkIdCreateRace:
+            user = User.objects.filter(clerk_id=clerk_user_id).first()
+            if not user:
+                raise
+            created = False
+            logger.info(
+                "Recovered local user sync after Clerk ID race for %s",
+                clerk_user_id,
+            )
 
         # Update cache
         set_cached_user(clerk_user_id, user)
@@ -344,7 +423,10 @@ def get_user_metadata(clerk_user_id: str) -> dict[str, Any]:
     """
     try:
         clerk = get_clerk_client()
-        clerk_user = clerk.users.get(user_id=clerk_user_id)
+        clerk_user = clerk.users.get(
+            user_id=clerk_user_id,
+            **_clerk_timeout_options(),
+        )
 
         if not clerk_user:
             return {"public": {}, "private": {}}
@@ -387,7 +469,11 @@ def update_user_metadata(
         if not update_data:
             return True
 
-        clerk.users.update(user_id=clerk_user_id, **update_data)
+        clerk.users.update(
+            user_id=clerk_user_id,
+            **update_data,
+            **_clerk_timeout_options(),
+        )
         return True
 
     except Exception as e:
@@ -462,7 +548,11 @@ def generate_username_for_user(
     if sync_to_clerk and user.clerk_id:
         try:
             clerk = get_clerk_client()
-            clerk.users.update(user_id=user.clerk_id, username=username)
+            clerk.users.update(
+                user_id=user.clerk_id,
+                username=username,
+                **_clerk_timeout_options(),
+            )
             logger.info(f"Synced username '{username}' to Clerk for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to sync username to Clerk for user {user_id}: {e}")

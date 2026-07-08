@@ -7,6 +7,9 @@ class DjangoClerkUsersConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
 
     def ready(self):
+        # Register Django system checks for production configuration mistakes.
+        from django_clerk_users import checks as _checks  # noqa: F401
+
         # Disconnect Django's update_last_login signal
         # Clerk manages authentication externally
         from django.contrib.auth import get_user_model

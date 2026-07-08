@@ -44,7 +44,8 @@ From [Clerk Dashboard](https://dashboard.clerk.com):
 
 - **Publishable Key** (starts with `pk_test_`)
 - **Secret Key** (starts with `sk_test_`)
-- **Webhook Signing Secret** (optional, starts with `whsec_`)
+- **Webhook Signing Secret** (starts with `whsec_`, required for the included
+  `/webhooks/clerk/` endpoint)
 
 ### 2. Backend Setup
 

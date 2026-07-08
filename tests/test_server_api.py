@@ -38,7 +38,9 @@ def make_client():
 
 
 def test_derive_clerk_username_sanitizes_email_local_part():
-    with patch("django_clerk_users.server_api.secrets.token_hex", return_value="abc123"):
+    with patch(
+        "django_clerk_users.server_api.secrets.token_hex", return_value="abc123"
+    ):
         username = server_api.derive_clerk_username("Ada.Lovelace+Staff@example.com")
 
     assert username == "adalovelacestaff_abc123"
@@ -51,8 +53,7 @@ def test_build_clerk_sign_in_url_adds_ticket_and_replaces_old_ticket():
     )
 
     assert url == (
-        "https://app.example.com/sign-in?next=%2Fdashboard"
-        "&__clerk_ticket=ticket_new"
+        "https://app.example.com/sign-in?next=%2Fdashboard&__clerk_ticket=ticket_new"
     )
 
 
@@ -79,6 +80,26 @@ def test_create_clerk_user_passwordless_uses_sdk_and_setting_timeout():
     )
 
 
+@override_settings(CLERK_API_TIMEOUT_MS="invalid")
+def test_create_clerk_user_uses_default_for_invalid_setting_timeout():
+    client = make_client()
+    client.users.create.return_value = {"id": "user_123"}
+
+    result = server_api.create_clerk_user(
+        "ada@example.com",
+        clerk_client=client,
+    )
+
+    assert result == {"id": "user_123"}
+    client.users.create.assert_called_once_with(
+        email_address=["ada@example.com"],
+        first_name="",
+        last_name="",
+        skip_password_requirement=True,
+        timeout_ms=10_000,
+    )
+
+
 def test_create_clerk_user_with_password_skips_password_checks():
     client = make_client()
     client.users.create.return_value = {"id": "user_123"}
@@ -102,16 +123,57 @@ def test_create_clerk_user_with_password_skips_password_checks():
     )
 
 
+def test_create_clerk_user_uses_default_for_non_positive_timeout():
+    client = make_client()
+    client.users.create.return_value = {"id": "user_123"}
+
+    result = server_api.create_clerk_user(
+        "ada@example.com",
+        clerk_client=client,
+        timeout_ms=0,
+    )
+
+    assert result == {"id": "user_123"}
+    client.users.create.assert_called_once_with(
+        email_address=["ada@example.com"],
+        first_name="",
+        last_name="",
+        skip_password_requirement=True,
+        timeout_ms=10_000,
+    )
+
+
 @override_settings(CLERK_SECRET_KEY="abc123")
 def test_create_clerk_user_returns_no_key_for_local_placeholder():
     assert server_api.create_clerk_user("ada@example.com") == {"no_key": True}
 
 
+@override_settings(CLERK_SECRET_KEY="  sk_live_replace_me  ")
+def test_create_clerk_user_returns_no_key_for_trimmed_placeholder():
+    assert server_api.create_clerk_user("ada@example.com") == {"no_key": True}
+
+
+@override_settings(CLERK_SECRET_KEY="  sk_test_unit_server_secret  ")
+def test_create_clerk_user_trims_secret_before_creating_sdk_client():
+    from django_clerk_users.client import get_clerk_client
+
+    client = make_client()
+    client.users.create.return_value = {"id": "user_123"}
+    get_clerk_client.cache_clear()
+
+    try:
+        with patch("django_clerk_users.client.Clerk", return_value=client) as Clerk:
+            result = server_api.create_clerk_user("ada@example.com")
+    finally:
+        get_clerk_client.cache_clear()
+
+    assert result == {"id": "user_123"}
+    Clerk.assert_called_once_with(bearer_auth="sk_test_unit_server_secret")
+
+
 def test_create_clerk_user_returns_already_exists_for_duplicate_email():
     client = make_client()
-    client.users.create.side_effect = FakeClerkIdentifierError(
-        params=["email_address"]
-    )
+    client.users.create.side_effect = FakeClerkIdentifierError(params=["email_address"])
 
     result = server_api.create_clerk_user("ada@example.com", clerk_client=client)
 
@@ -174,6 +236,30 @@ def test_get_clerk_user_by_email_returns_first_user():
     )
 
 
+def test_get_clerk_user_by_email_accepts_paginated_data_response():
+    client = make_client()
+    client.users.list.return_value = SimpleNamespace(data=[{"id": "user_123"}])
+
+    result = server_api.get_clerk_user_by_email(
+        "ada@example.com",
+        clerk_client=client,
+    )
+
+    assert result == {"id": "user_123"}
+
+
+def test_get_clerk_user_by_email_returns_none_for_empty_data_response():
+    client = make_client()
+    client.users.list.return_value = SimpleNamespace(data=[])
+
+    result = server_api.get_clerk_user_by_email(
+        "ada@example.com",
+        clerk_client=client,
+    )
+
+    assert result is None
+
+
 def test_create_clerk_sign_in_token_returns_token():
     client = make_client()
     client.sign_in_tokens.create.return_value = {"token": "ticket_123"}
@@ -191,6 +277,19 @@ def test_create_clerk_sign_in_token_returns_token():
     )
 
 
+def test_create_clerk_sign_in_token_returns_none_for_invalid_expiry():
+    client = make_client()
+
+    token = server_api.create_clerk_sign_in_token(
+        "user_123",
+        expires_in_seconds="bad",  # type: ignore[arg-type]
+        clerk_client=client,
+    )
+
+    assert token is None
+    client.sign_in_tokens.create.assert_not_called()
+
+
 def test_create_clerk_sign_in_link_builds_link_from_token():
     client = make_client()
     client.sign_in_tokens.create.return_value = {"token": "ticket_123"}
@@ -206,9 +305,7 @@ def test_create_clerk_sign_in_link_builds_link_from_token():
 
 def test_provision_clerk_user_access_link_resolves_existing_user():
     client = make_client()
-    client.users.create.side_effect = FakeClerkIdentifierError(
-        params=["email_address"]
-    )
+    client.users.create.side_effect = FakeClerkIdentifierError(params=["email_address"])
     client.users.list.return_value = [{"id": "user_existing"}]
     client.sign_in_tokens.create.return_value = {"token": "ticket_123"}
 
@@ -318,6 +415,22 @@ def test_revoke_clerk_user_sessions_revokes_active_sessions():
         call(session_id="sess_1", timeout_ms=250),
         call(session_id="sess_2", timeout_ms=250),
     ]
+
+
+def test_revoke_clerk_user_sessions_accepts_paginated_data_response():
+    client = make_client()
+    client.sessions.list.return_value = SimpleNamespace(data=[{"id": "sess_1"}])
+
+    result = server_api.revoke_clerk_user_sessions(
+        "user_123",
+        clerk_client=client,
+    )
+
+    assert result == 1
+    client.sessions.revoke.assert_called_once_with(
+        session_id="sess_1",
+        timeout_ms=10_000,
+    )
 
 
 def test_send_and_revoke_clerk_invitation():

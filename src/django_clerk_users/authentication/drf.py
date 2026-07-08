@@ -43,6 +43,16 @@ except ImportError:
     exceptions = None  # type: ignore[assignment]
 
 
+def _authorization_scheme(auth_header: str | bytes) -> str:
+    if isinstance(auth_header, bytes):
+        auth_header = auth_header.decode("latin1")
+
+    parts = auth_header.strip().split(None, 1)
+    if not parts:
+        return ""
+    return parts[0].lower()
+
+
 class ClerkAuthentication(_BaseAuthentication):
     """
     Django REST Framework authentication class for Clerk.
@@ -154,11 +164,10 @@ class ClerkSessionAuthentication(_BaseAuthentication):
     def authenticate(
         self, request: HttpRequest
     ) -> tuple[AbstractClerkUser, dict] | None:
-        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
-        if isinstance(auth_header, bytes):
-            auth_header = auth_header.decode("latin1")
-
-        if auth_header.lower().startswith("bearer "):
+        if (
+            _authorization_scheme(request.META.get("HTTP_AUTHORIZATION", ""))
+            == "bearer"
+        ):
             return self.clerk_authentication.authenticate(request)
 
         return self.session_authentication.authenticate(request)

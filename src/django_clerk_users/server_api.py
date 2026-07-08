@@ -18,13 +18,15 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.conf import settings
 
-from django_clerk_users.client import get_clerk_client
+from django_clerk_users.client import (
+    get_clerk_client,
+    get_configured_clerk_secret_key,
+)
 from django_clerk_users.exceptions import ClerkConfigurationError
 
 logger = logging.getLogger(__name__)
 
 CLERK_API_DEFAULT_TIMEOUT_MS = 10_000
-CLERK_NO_KEY_SENTINELS = {"abc123"}
 DUPLICATE_IDENTIFIER_CODES = {
     "form_identifier_exists",
     "form_identifier_not_unique",
@@ -35,8 +37,7 @@ def _resolve_clerk_client(clerk_client: Any | None = None) -> Any | None:
     if clerk_client is not None:
         return clerk_client
 
-    secret_key = getattr(settings, "CLERK_SECRET_KEY", None)
-    if not secret_key or secret_key in CLERK_NO_KEY_SENTINELS:
+    if not get_configured_clerk_secret_key():
         return None
 
     try:
@@ -46,13 +47,30 @@ def _resolve_clerk_client(clerk_client: Any | None = None) -> Any | None:
 
 
 def _timeout_options(timeout_ms: int | None) -> dict[str, int]:
-    if timeout_ms is None:
-        timeout_ms = getattr(
-            settings,
-            "CLERK_API_TIMEOUT_MS",
+    raw_timeout = (
+        timeout_ms
+        if timeout_ms is not None
+        else getattr(settings, "CLERK_API_TIMEOUT_MS", CLERK_API_DEFAULT_TIMEOUT_MS)
+    )
+    try:
+        resolved_timeout = int(raw_timeout)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid CLERK_API_TIMEOUT_MS value %r, using default %s",
+            raw_timeout,
             CLERK_API_DEFAULT_TIMEOUT_MS,
         )
-    return {"timeout_ms": int(timeout_ms)}
+        resolved_timeout = CLERK_API_DEFAULT_TIMEOUT_MS
+
+    if resolved_timeout <= 0:
+        logger.warning(
+            "Non-positive Clerk API timeout %r, using default %s",
+            raw_timeout,
+            CLERK_API_DEFAULT_TIMEOUT_MS,
+        )
+        resolved_timeout = CLERK_API_DEFAULT_TIMEOUT_MS
+
+    return {"timeout_ms": resolved_timeout}
 
 
 def _plain_data(value: Any) -> Any:
@@ -82,6 +100,13 @@ def _get_value(value: Any, key: str, default: Any = None) -> Any:
     if isinstance(value, Mapping):
         return value.get(key, default)
     return getattr(value, key, default)
+
+
+def _list_data(response: Any) -> list[Any]:
+    data = _get_value(response, "data", response)
+    if data is None:
+        return []
+    return list(data)
 
 
 def _error_param_names(error: Any) -> set[str]:
@@ -212,7 +237,7 @@ def get_clerk_user_by_email(
         return None
 
     try:
-        users = client.users.list(
+        response = client.users.list(
             request={"email_address": [email], "limit": 1},
             **_timeout_options(timeout_ms),
         )
@@ -220,6 +245,7 @@ def get_clerk_user_by_email(
         _log_clerk_error(f"user lookup for {email}", exc)
         return None
 
+    users = _list_data(response)
     if not users:
         return None
     return _plain_data(users[0])
@@ -535,13 +561,13 @@ def revoke_clerk_user_sessions(
         return None
 
     try:
-        sessions = client.sessions.list(
+        response = client.sessions.list(
             user_id=clerk_user_id,
             status="active",
             **_timeout_options(timeout_ms),
         )
         revoked = 0
-        for session in sessions or []:
+        for session in _list_data(response):
             session_id = _get_value(session, "id")
             if not session_id:
                 continue

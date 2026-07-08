@@ -6,7 +6,7 @@ import time
 from unittest.mock import patch
 
 import pytest
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user, get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.backends.db import SessionStore
 from django.http import HttpResponse
@@ -54,6 +54,12 @@ def middleware():
     return ClerkAuthMiddleware(get_response)
 
 
+@pytest.fixture(autouse=True)
+def configured_clerk_secret(settings):
+    """Use a non-placeholder key for tests that expect Clerk middleware to run."""
+    settings.CLERK_SECRET_KEY = "sk_test_unit_middleware_secret"
+
+
 def make_request_with_session(request_factory):
     """Create a request with a session."""
     request = request_factory.get("/")
@@ -88,6 +94,76 @@ class TestMiddlewareAnonymousUser:
         assert request.clerk_user is None
         assert request.clerk_payload is None
         assert request.org is None
+
+    def test_runtime_missing_secret_skips_clerk_auth(
+        self, middleware, request_factory, settings
+    ):
+        """Test that middleware reads CLERK_SECRET_KEY at request time."""
+        settings.CLERK_SECRET_KEY = ""
+        request = make_request_with_session(request_factory)
+
+        with patch(
+            "django_clerk_users.middleware.auth.get_clerk_payload_from_request"
+        ) as get_payload:
+            middleware.process_request(request)
+
+        get_payload.assert_not_called()
+        assert isinstance(request.user, AnonymousUser)
+        assert request.clerk_user is None
+        assert request.clerk_payload is None
+        assert request.org is None
+
+    def test_placeholder_secret_skips_clerk_auth(
+        self, middleware, request_factory, settings
+    ):
+        """Test documented placeholder keys are treated as unconfigured."""
+        settings.CLERK_SECRET_KEY = "sk_live_replace_me"
+        request = make_request_with_session(request_factory)
+
+        with patch(
+            "django_clerk_users.middleware.auth.get_clerk_payload_from_request"
+        ) as get_payload:
+            middleware.process_request(request)
+
+        get_payload.assert_not_called()
+        assert isinstance(request.user, AnonymousUser)
+        assert request.clerk_user is None
+        assert request.clerk_payload is None
+        assert request.org is None
+
+    def test_whitespace_placeholder_secret_skips_clerk_auth(
+        self, middleware, request_factory, settings
+    ):
+        """Test placeholder keys remain unconfigured after trimming."""
+        settings.CLERK_SECRET_KEY = "  sk_live_replace_me  "
+        request = make_request_with_session(request_factory)
+
+        with patch(
+            "django_clerk_users.middleware.auth.get_clerk_payload_from_request"
+        ) as get_payload:
+            middleware.process_request(request)
+
+        get_payload.assert_not_called()
+        assert isinstance(request.user, AnonymousUser)
+        assert request.clerk_user is None
+        assert request.clerk_payload is None
+        assert request.org is None
+
+    def test_whitespace_real_secret_allows_clerk_auth(
+        self, middleware, request_factory, settings
+    ):
+        """Test real keys are stripped instead of disabling authentication."""
+        settings.CLERK_SECRET_KEY = "  sk_test_unit_middleware_secret  "
+        request = make_request_with_session(request_factory)
+
+        with patch(
+            "django_clerk_users.middleware.auth.get_clerk_payload_from_request",
+            return_value=None,
+        ) as get_payload:
+            middleware.process_request(request)
+
+        get_payload.assert_called_once_with(request)
+        assert isinstance(request.user, AnonymousUser)
 
 
 class TestMiddlewareTokenValidation:
@@ -153,6 +229,10 @@ class TestMiddlewareSessionHandling:
         assert "django_clerk_users.authentication.ClerkBackend" in request.session.get(
             "_auth_user_backend", ""
         )
+        assert request.session.get("_auth_user_hash") == (
+            clerk_user.get_session_auth_hash()
+        )
+        assert get_user(request) == clerk_user
 
     def test_valid_session_skips_token_validation(
         self, middleware, request_factory, clerk_user
@@ -296,6 +376,27 @@ class TestMiddlewareRevalidation:
 
         # Should update org from new payload
         assert request.org == "org_new"
+
+    def test_revalidation_interval_is_read_at_request_time(
+        self, middleware, request_factory, clerk_user, settings
+    ):
+        """Test override_settings can extend the Clerk session revalidation window."""
+        settings.CLERK_SESSION_REVALIDATION_SECONDS = 9999
+        request = make_request_with_session(request_factory)
+
+        request.user = clerk_user
+        request.session["_auth_user_id"] = str(clerk_user.pk)
+        request.session["last_clerk_check"] = int(time.time()) - 400
+        request.session["clerk_org_id"] = "org_existing"
+
+        with patch(
+            "django_clerk_users.middleware.auth.get_clerk_payload_from_request"
+        ) as get_payload:
+            middleware.process_request(request)
+
+        get_payload.assert_not_called()
+        assert request.clerk_user == clerk_user
+        assert request.org == "org_existing"
 
 
 class TestMiddlewareCall:

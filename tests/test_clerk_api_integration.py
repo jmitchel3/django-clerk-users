@@ -18,10 +18,11 @@ from django.contrib.auth import get_user_model
 from django_clerk_users.settings import CLERK_SECRET_KEY
 
 # Skip all tests in this module if no real Clerk credentials
-REAL_CLERK_KEY = os.environ.get("CLERK_SECRET_KEY", CLERK_SECRET_KEY)
+REAL_CLERK_KEY = (os.environ.get("CLERK_SECRET_KEY", CLERK_SECRET_KEY) or "").strip()
 HAS_REAL_CREDENTIALS = (
     REAL_CLERK_KEY
     and not REAL_CLERK_KEY.startswith("sk_test_mock")
+    and REAL_CLERK_KEY != "sk_live_replace_me"
     and REAL_CLERK_KEY.startswith("sk_")
 )
 
@@ -83,7 +84,9 @@ class TestClerkAPIUserCreation:
         # Should also have email since skip_email=False by default
         assert user_data.email is not None
 
-    @pytest.mark.skip(reason="Requires Clerk instance configured to allow username-only users")
+    @pytest.mark.skip(
+        reason="Requires Clerk instance configured to allow username-only users"
+    )
     def test_create_username_only_user(self, clerk_client, created_users):
         """Test creating a username-only user (no email) via Clerk API.
 
@@ -100,7 +103,9 @@ class TestClerkAPIUserCreation:
         assert user_data.username == "username_only_test"
         assert user_data.email is None
 
-    def test_create_user_with_both_email_and_username(self, clerk_client, created_users):
+    def test_create_user_with_both_email_and_username(
+        self, clerk_client, created_users
+    ):
         """Test creating a user with both email and username."""
         from django_clerk_users.testing import make_test_email
 
@@ -136,7 +141,9 @@ class TestClerkAPISyncIntegration:
         assert django_user.first_name == "Test"
         assert django_user.last_name == "User"
 
-    @pytest.mark.skip(reason="Requires Clerk instance configured to allow username-only users")
+    @pytest.mark.skip(
+        reason="Requires Clerk instance configured to allow username-only users"
+    )
     def test_sync_username_user_to_django(self, db, clerk_client, created_users):
         """Test syncing a username-only user from Clerk to Django.
 
@@ -211,7 +218,9 @@ class TestClerkAPISessionToken:
         # JWT tokens have 3 parts separated by dots
         assert token.count(".") == 2
 
-    @pytest.mark.skip(reason="Requires Clerk instance configured to allow username-only users")
+    @pytest.mark.skip(
+        reason="Requires Clerk instance configured to allow username-only users"
+    )
     def test_get_session_token_username_only_user(self, clerk_client, created_users):
         """Test getting a session token for a username-only user.
 
@@ -239,7 +248,10 @@ class TestClerkAPIUsernameSync:
         from clerk_backend_api.models import GetUserListRequest
 
         from django_clerk_users.client import get_clerk_client
-        from django_clerk_users.utils import generate_username_for_user, update_or_create_clerk_user
+        from django_clerk_users.utils import (
+            generate_username_for_user,
+            update_or_create_clerk_user,
+        )
 
         clerk = get_clerk_client()
         persistent_email = "testuser+clerk_test_auto_username@example.com"
@@ -275,7 +287,10 @@ class TestClerkAPIUsernameSync:
     def test_generate_username_sync_disabled(self, db, clerk_client, created_users):
         """Test that sync_to_clerk=False skips Clerk sync."""
         from django_clerk_users.client import get_clerk_client
-        from django_clerk_users.utils import generate_username_for_user, update_or_create_clerk_user
+        from django_clerk_users.utils import (
+            generate_username_for_user,
+            update_or_create_clerk_user,
+        )
 
         # 1. Create user in Clerk without a username
         clerk_user = clerk_client.create_test_user()
@@ -285,7 +300,9 @@ class TestClerkAPIUsernameSync:
         django_user, _ = update_or_create_clerk_user(clerk_user.id)
 
         # 3. Generate username locally WITHOUT syncing to Clerk
-        generated_username = generate_username_for_user(django_user.pk, sync_to_clerk=False)
+        generated_username = generate_username_for_user(
+            django_user.pk, sync_to_clerk=False
+        )
 
         assert generated_username is not None
 
@@ -316,7 +333,9 @@ class TestClerkAPIFullFlow:
         assert retrieved.pk == django_user.pk
         assert retrieved.email == clerk_user.email
 
-    @pytest.mark.skip(reason="Requires Clerk instance configured to allow username-only users")
+    @pytest.mark.skip(
+        reason="Requires Clerk instance configured to allow username-only users"
+    )
     def test_full_flow_username_only_user(self, db, clerk_client, created_users):
         """Test complete flow for username-only user.
 
@@ -351,7 +370,9 @@ class TestClerkAPIFullFlow:
         assert by_username is not None
         assert by_username.pk == django_user.pk
 
-    @pytest.mark.skip(reason="Requires Clerk instance configured to allow username-only users")
+    @pytest.mark.skip(
+        reason="Requires Clerk instance configured to allow username-only users"
+    )
     def test_user_display_methods(self, db, clerk_client, created_users):
         """Test __str__ and get_short_name for various user types.
 

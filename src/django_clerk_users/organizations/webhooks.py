@@ -5,11 +5,13 @@ Webhook handlers for organization events.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from django.db import transaction
 
 from django_clerk_users.caching import invalidate_organization_cache
+from django_clerk_users.utils import _clerk_timeout_options
 from django_clerk_users.webhooks.handlers import parse_clerk_timestamp
 from django_clerk_users.webhooks.signals import (
     clerk_invitation_accepted,
@@ -25,6 +27,84 @@ from django_clerk_users.webhooks.signals import (
 
 logger = logging.getLogger(__name__)
 
+_MISSING = object()
+
+
+def _get_value(source: Any, key: str, default: Any = None) -> Any:
+    if isinstance(source, Mapping):
+        return source.get(key, default)
+    return getattr(source, key, default)
+
+
+def _has_value(source: Any, key: str) -> bool:
+    if isinstance(source, Mapping):
+        return key in source
+    return hasattr(source, key)
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _organization_defaults(
+    source: Any,
+    *,
+    preserve_missing: bool = False,
+) -> dict[str, Any]:
+    defaults = {}
+    field_map = {
+        "name": ("name", ""),
+        "slug": ("slug", ""),
+        "image_url": ("image_url", ""),
+        "members_count": ("members_count", 0),
+        "pending_invitations_count": ("pending_invitations_count", 0),
+        "max_allowed_memberships": ("max_allowed_memberships", 0),
+    }
+
+    for model_field, (source_key, default) in field_map.items():
+        if preserve_missing and not _has_value(source, source_key):
+            continue
+        defaults[model_field] = _get_value(source, source_key, default) or default
+
+    for metadata_field in ("public_metadata", "private_metadata"):
+        if preserve_missing and not _has_value(source, metadata_field):
+            continue
+        defaults[metadata_field] = _json_object(_get_value(source, metadata_field, {}))
+
+    created_at = _get_value(source, "created_at", _MISSING)
+    if created_at is not _MISSING:
+        parsed_created_at = parse_clerk_timestamp(created_at)
+        if parsed_created_at:
+            defaults["created_at"] = parsed_created_at
+
+    return defaults
+
+
+def _upsert_organization(
+    org_id: str,
+    source: Any,
+    *,
+    preserve_missing: bool = False,
+) -> tuple:
+    from django_clerk_users.organizations.models import Organization
+
+    org_data = _organization_defaults(source, preserve_missing=preserve_missing)
+    organization, created = Organization.objects.update_or_create(
+        clerk_id=org_id,
+        defaults=org_data,
+    )
+    return organization, created
+
+
+def update_or_create_organization_from_data(data: Mapping[str, Any]) -> tuple:
+    """Update or create an Organization from a verified Clerk webhook payload."""
+    org_id = data.get("id")
+    if not org_id:
+        logger.error("Organization webhook data missing organization ID")
+        return None, False
+
+    return _upsert_organization(str(org_id), data, preserve_missing=True)
+
 
 def update_or_create_organization(org_id: str) -> tuple:
     """
@@ -37,38 +117,18 @@ def update_or_create_organization(org_id: str) -> tuple:
         A tuple of (organization, created).
     """
     from django_clerk_users.client import get_clerk_client
-    from django_clerk_users.organizations.models import Organization
 
     clerk = get_clerk_client()
-    clerk_org = clerk.organizations.get(organization_id=org_id)
+    clerk_org = clerk.organizations.get(
+        organization_id=org_id,
+        **_clerk_timeout_options(),
+    )
 
     if not clerk_org:
         logger.error(f"Organization not found in Clerk: {org_id}")
         return None, False
 
-    org_data = {
-        "name": getattr(clerk_org, "name", ""),
-        "slug": getattr(clerk_org, "slug", ""),
-        "image_url": getattr(clerk_org, "image_url", "") or "",
-        "public_metadata": getattr(clerk_org, "public_metadata", {}) or {},
-        "private_metadata": getattr(clerk_org, "private_metadata", {}) or {},
-        "members_count": getattr(clerk_org, "members_count", 0) or 0,
-        "pending_invitations_count": getattr(clerk_org, "pending_invitations_count", 0)
-        or 0,
-        "max_allowed_memberships": getattr(clerk_org, "max_allowed_memberships", 0)
-        or 0,
-    }
-
-    created_at = parse_clerk_timestamp(getattr(clerk_org, "created_at", None))
-    if created_at:
-        org_data["created_at"] = created_at
-
-    organization, created = Organization.objects.update_or_create(
-        clerk_id=org_id,
-        defaults=org_data,
-    )
-
-    return organization, created
+    return _upsert_organization(org_id, clerk_org)
 
 
 @transaction.atomic
@@ -82,7 +142,7 @@ def handle_organization_created(data: dict[str, Any]) -> bool:
         return False
 
     try:
-        organization, created = update_or_create_organization(org_id)
+        organization, created = update_or_create_organization_from_data(data)
         if organization:
             clerk_organization_created.send(
                 sender=Organization,
@@ -109,7 +169,7 @@ def handle_organization_updated(data: dict[str, Any]) -> bool:
 
     try:
         invalidate_organization_cache(org_id)
-        organization, created = update_or_create_organization(org_id)
+        organization, created = update_or_create_organization_from_data(data)
         if organization:
             clerk_organization_updated.send(
                 sender=Organization,
@@ -175,7 +235,10 @@ def handle_membership_created(data: dict[str, Any]) -> bool:
     try:
         organization = Organization.objects.filter(clerk_id=org_id).first()
         if not organization:
-            organization, _ = update_or_create_organization(org_id)
+            if isinstance(org_data, Mapping):
+                organization, _ = update_or_create_organization_from_data(org_data)
+            else:
+                organization, _ = update_or_create_organization(org_id)
 
         user = User.objects.filter(clerk_id=user_id).first()
         if not user:
@@ -301,7 +364,13 @@ def handle_invitation_created(data: dict[str, Any]) -> bool:
     try:
         organization = Organization.objects.filter(clerk_id=org_id).first()
         if not organization:
-            organization, _ = update_or_create_organization(org_id)
+            nested_org_data = data.get("organization")
+            if isinstance(nested_org_data, Mapping):
+                organization, _ = update_or_create_organization_from_data(
+                    nested_org_data
+                )
+            else:
+                organization, _ = update_or_create_organization(org_id)
 
         inviter = None
         inviter_id = data.get("inviter_user_id")
@@ -421,7 +490,11 @@ def process_organization_event(event_type: str, data: dict[str, Any]) -> bool:
 
     handler = handlers.get(event_type)
     if handler:
-        return handler(data)
+        try:
+            return handler(data)
+        except Exception as e:
+            logger.error(f"Error handling {event_type}: {e}")
+            return False
 
     logger.debug(f"Unhandled organization event type: {event_type}")
     return True

@@ -11,7 +11,6 @@ from django_clerk_users.organizations.models import (
 )
 
 
-@admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
     list_display = [
         "name",
@@ -34,7 +33,6 @@ class OrganizationAdmin(admin.ModelAdmin):
     ordering = ["-created_at"]
 
 
-@admin.register(OrganizationMember)
 class OrganizationMemberAdmin(admin.ModelAdmin):
     list_display = [
         "user",
@@ -57,7 +55,6 @@ class OrganizationMemberAdmin(admin.ModelAdmin):
     ordering = ["-joined_at"]
 
 
-@admin.register(OrganizationInvitation)
 class OrganizationInvitationAdmin(admin.ModelAdmin):
     list_display = [
         "email_address",
@@ -79,3 +76,21 @@ class OrganizationInvitationAdmin(admin.ModelAdmin):
     ]
     raw_id_fields = ["organization", "inviter"]
     ordering = ["-created_at"]
+
+
+def register_organization_admins(site: admin.AdminSite = admin.site) -> list[type]:
+    """Register organization admin models, skipping models already registered."""
+    registered_models = []
+    for model, admin_class in (
+        (Organization, OrganizationAdmin),
+        (OrganizationMember, OrganizationMemberAdmin),
+        (OrganizationInvitation, OrganizationInvitationAdmin),
+    ):
+        if site.is_registered(model):
+            continue
+        site.register(model, admin_class)
+        registered_models.append(model)
+    return registered_models
+
+
+register_organization_admins()

@@ -2,7 +2,8 @@
 
 Integrate [Clerk](https://clerk.com) authentication with Django.
 
-> **Note:** This package is in early development (v0.3.x). APIs may change.
+> **Production note:** Pin versions and review release notes before upgrading
+> between minor versions.
 
 ## Features
 
@@ -25,6 +26,15 @@ For Django REST Framework support:
 ```bash
 pip install django-clerk-users[drf]
 ```
+
+Use `.env.example` as a starting point for required Clerk settings in each
+environment.
+
+## Compatibility
+
+This package supports Python 3.12 through 3.14 and Django 4.2, 5.2, and 6.0.
+CI installs and tests the built wheel across those supported Django/Python
+combinations and exercises the optional Django REST Framework extra.
 
 ## Quick Start
 
@@ -62,6 +72,7 @@ Or extend the abstract model for custom fields:
 
 ```python
 # myapp/models.py
+from django.db import models
 from django_clerk_users.models import AbstractClerkUser
 
 
@@ -254,9 +265,9 @@ The helpers cover common server-side tasks:
 - `revoke_clerk_user_sessions()`, `send_clerk_invitation()`, and
   `revoke_clerk_invitation()` wrap common account-management operations.
 
-When `CLERK_SECRET_KEY` is missing or set to the local-dev placeholder `abc123`,
-creation helpers return `{"no_key": True}` and mutation helpers no-op with a
-falsey result.
+When `CLERK_SECRET_KEY` is missing or set to a documented local placeholder
+(`abc123`, `sk_test_mock_secret_key`, or `sk_live_replace_me`), creation helpers
+return `{"no_key": True}` and mutation helpers no-op with a falsey result.
 
 ## Hybrid Authentication (Clerk + Django Admin)
 
@@ -371,7 +382,75 @@ python manage.py sync_clerk_users
 
 # Sync organizations from Clerk
 python manage.py sync_clerk_organizations
+
+# Preview migration of existing Django users into Clerk
+python manage.py migrate_users_to_clerk --source-model auth.User --all --dry-run --skip-existing
+
+# Migrate a bounded batch and link local rows when matching Clerk users already exist
+python manage.py migrate_users_to_clerk --source-model auth.User --all --limit 100 --skip-existing
 ```
+
+`migrate_users_to_clerk` creates passwordless Clerk users because Django password
+hashes cannot be migrated into Clerk. Existing local users with a `clerk_id`
+field are linked to matching Clerk users when `--skip-existing` is used, and the
+command recovers duplicate-email create races by looking up and linking the
+existing Clerk user. `--created-before YYYY-MM-DD` filters on `date_joined` for
+classic Django users and `created_at` for `ClerkUser`-based source models.
+
+## Production Checklist
+
+- Set `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SIGNING_KEY`, and
+  `CLERK_FRONTEND_HOSTS` from environment variables or a secret manager.
+- Serve webhook endpoints over HTTPS and keep Svix signature verification
+  enabled. Use a separate signing secret for each custom webhook endpoint.
+- Put `ClerkAuthMiddleware` after Django's `AuthenticationMiddleware`, and put
+  `ClerkOrganizationMiddleware` after `ClerkAuthMiddleware` when using
+  organizations.
+- Run `python manage.py check --deploy` in CI or deployment validation; the
+  package registers checks for placeholder secrets, missing frontend host
+  allowlists, and middleware ordering.
+- Configure application logging for `django_clerk_users.*` so authentication,
+  webhook, and sync failures are visible in production.
+- Run `python manage.py migrate` during deploys and run sync commands with
+  `--dry-run` before backfilling existing Clerk data.
+- Keep the package's CI gates enabled: lockfile checks, Ruff, formatting,
+  migrations, tox across supported Python versions, build verification, and
+  coverage threshold enforcement.
+
+### Release validation
+
+Before publishing a release, run the artifact and installed-wheel checks:
+
+```bash
+uv build
+uv run python scripts/check_dist.py
+uv run --no-sync python -m pip install --force-reinstall --no-deps dist/django_clerk_users-*.whl
+uv run --no-sync python scripts/smoke_installed_wheel.py
+```
+
+Then run the read-only live Clerk smoke check against a test/development Clerk
+instance:
+
+```bash
+export CLERK_SECRET_KEY=sk_test_...
+export CLERK_WEBHOOK_SIGNING_KEY=whsec_...
+export CLERK_FRONTEND_HOSTS=https://app.example.com
+# Optional: make the smoke check verify a known existing user lookup.
+export CLERK_LIVE_SMOKE_LOOKUP_EMAIL=user@example.com
+
+uv run python scripts/live_clerk_smoke.py
+```
+
+`scripts/live_clerk_smoke.py` performs no writes. It runs Django system checks,
+calls Clerk's user list endpoint, optionally looks up an existing user by email,
+and verifies a signed Svix webhook payload through the package verifier.
+
+The tag-based release workflow runs these same artifact checks and the live
+Clerk smoke check before publishing to PyPI. Configure the `release` environment
+with `CLERK_SECRET_KEY` and `CLERK_WEBHOOK_SIGNING_KEY` secrets, plus optional
+`CLERK_FRONTEND_HOSTS` and `CLERK_LIVE_SMOKE_LOOKUP_EMAIL` variables.
+Use the `Live Clerk Smoke` workflow to run the same installed-wheel and live
+Clerk checks manually before tagging a release.
 
 ## Auto-Generated Usernames
 
@@ -478,6 +557,10 @@ CLERK_DISABLE_PASSWORD_SYNC = True
 | `CLERK_AUTO_GENERATE_USERNAME_PREFIX` | No | `"user"` | Prefix for auto-generated usernames |
 | `CLERK_SYNC_PASSWORDS` | No | `True` | Sync Django password changes to Clerk when a user has `clerk_id` |
 | `CLERK_DISABLE_PASSWORD_SYNC` | No | `False` | Legacy opt-out; disables password sync when `True` |
+
+Comma-separated strings are accepted for `CLERK_FRONTEND_HOSTS` and
+`CLERK_AUTH_PARTIES`. Numeric settings may be provided as strings. Boolean
+settings accept common environment values such as `true`, `false`, `1`, and `0`.
 
 ## License
 

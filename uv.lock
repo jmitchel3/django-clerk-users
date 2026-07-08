@@ -363,7 +363,7 @@ wheels = [
 
 [[package]]
 name = "django-clerk-users"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "clerk-backend-api" },
@@ -393,7 +393,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "clerk-backend-api", specifier = ">=1" },
-    { name = "django", specifier = ">=4.2" },
+    { name = "django", specifier = ">=4.2,<7.0" },
     { name = "djangorestframework", marker = "extra == 'drf'", specifier = ">=3.14" },
     { name = "svix", specifier = ">=1" },
 ]

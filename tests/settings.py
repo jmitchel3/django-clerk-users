@@ -5,8 +5,8 @@ Django settings for testing django-clerk-users.
 import os
 from pathlib import Path
 
-# Load .env file from examples directory if it exists
-# This allows integration tests to use real Clerk credentials
+# Loading ignored demo credentials is opt-in so regular unit tests stay
+# deterministic and do not accidentally call live Clerk APIs.
 _env_file = (
     Path(__file__).parent.parent
     / "examples"
@@ -14,7 +14,7 @@ _env_file = (
     / "backend"
     / ".env"
 )
-if _env_file.exists():
+if os.environ.get("DJANGO_CLERK_USERS_LOAD_EXAMPLE_ENV") == "1" and _env_file.exists():
     try:
         from dotenv import load_dotenv
 
@@ -27,8 +27,10 @@ SECRET_KEY = "test-secret-key-for-django-clerk-users"
 DEBUG = True
 
 INSTALLED_APPS = [
+    "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
+    "django.contrib.messages",
     "django.contrib.sessions",
     "django_clerk_users",
     "django_clerk_users.organizations",
@@ -36,8 +38,24 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
     "django_clerk_users.middleware.ClerkAuthMiddleware",
     "django_clerk_users.organizations.middleware.ClerkOrganizationMiddleware",
+]
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    }
 ]
 
 DATABASES = {

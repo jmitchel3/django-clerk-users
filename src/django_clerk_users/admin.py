@@ -8,7 +8,6 @@ from django.contrib.auth.admin import UserAdmin
 from django_clerk_users.models import ClerkUser
 
 
-@admin.register(ClerkUser)
 class ClerkUserAdmin(UserAdmin):
     list_display = [
         "email",
@@ -64,3 +63,25 @@ class ClerkUserAdmin(UserAdmin):
         "last_login",
         "last_logout",
     ]
+
+
+def _model_is_swapped(model) -> bool:
+    return bool(getattr(model._meta, "swapped", None))
+
+
+def register_clerk_user_admin(site: admin.AdminSite = admin.site) -> bool:
+    """
+    Register the default ClerkUser admin when the model is active.
+
+    If projects use a custom AUTH_USER_MODEL based on AbstractClerkUser, Django
+    marks this concrete model as swapped. Registering a swapped model creates a
+    broken admin entry, so custom-user projects should register their own model.
+    """
+    if _model_is_swapped(ClerkUser) or site.is_registered(ClerkUser):
+        return False
+
+    site.register(ClerkUser, ClerkUserAdmin)
+    return True
+
+
+register_clerk_user_admin()

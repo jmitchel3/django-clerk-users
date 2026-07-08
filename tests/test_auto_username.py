@@ -5,6 +5,7 @@ Tests for auto-generated username functionality.
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 
 User = get_user_model()
 
@@ -26,6 +27,13 @@ class TestGenerateUniqueUsername:
         assert username.startswith("testuser_")
         assert len(username) == 17  # "testuser_" (9) + uuid8 (8)
 
+    @override_settings(CLERK_AUTO_GENERATE_USERNAME_PREFIX="member")
+    def test_generate_unique_username_uses_runtime_default_prefix(self, db):
+        """Test generating username with the configured default prefix."""
+        username = User.objects.generate_unique_username()
+
+        assert username.startswith("member_")
+
     def test_generate_unique_username_is_unique(self, db):
         """Test that generated usernames don't collide with existing users."""
         # Create users with several usernames
@@ -46,8 +54,8 @@ class TestGenerateUniqueUsername:
 class TestAutoGenerateUsernameSetting:
     """Tests for CLERK_AUTO_GENERATE_USERNAME setting."""
 
+    @override_settings(CLERK_AUTO_GENERATE_USERNAME=False)
     @patch("django_clerk_users.utils.get_clerk_client")
-    @patch("django_clerk_users.settings.CLERK_AUTO_GENERATE_USERNAME", False)
     def test_auto_generate_disabled_by_default(self, mock_get_client, db):
         """Test that auto-generation is disabled by default."""
         from django_clerk_users.utils import update_or_create_clerk_user
@@ -70,8 +78,8 @@ class TestAutoGenerateUsernameSetting:
         assert created is True
         assert user.username is None
 
+    @override_settings(CLERK_AUTO_GENERATE_USERNAME=True)
     @patch("django_clerk_users.utils.get_clerk_client")
-    @patch("django_clerk_users.settings.CLERK_AUTO_GENERATE_USERNAME", True)
     def test_auto_generate_when_enabled(self, mock_get_client, db):
         """Test that username is auto-generated when setting is enabled."""
         from django_clerk_users.utils import update_or_create_clerk_user
@@ -95,8 +103,55 @@ class TestAutoGenerateUsernameSetting:
         assert user.username is not None
         assert user.username.startswith("user_")
 
+    @override_settings(CLERK_AUTO_GENERATE_USERNAME="true")
     @patch("django_clerk_users.utils.get_clerk_client")
-    @patch("django_clerk_users.settings.CLERK_AUTO_GENERATE_USERNAME", True)
+    def test_auto_generate_accepts_env_style_true_string(self, mock_get_client, db):
+        """Test environment-style true strings enable username generation."""
+        from django_clerk_users.utils import update_or_create_clerk_user
+
+        mock_clerk_user = MagicMock()
+        mock_clerk_user.email_addresses = []
+        mock_clerk_user.primary_email_address_id = None
+        mock_clerk_user.username = None
+        mock_clerk_user.first_name = "Env"
+        mock_clerk_user.last_name = "True"
+        mock_clerk_user.image_url = ""
+
+        mock_client = MagicMock()
+        mock_client.users.get.return_value = mock_clerk_user
+        mock_get_client.return_value = mock_client
+
+        user, created = update_or_create_clerk_user("clerk_env_true")
+
+        assert created is True
+        assert user.username is not None
+        assert user.username.startswith("user_")
+
+    @override_settings(CLERK_AUTO_GENERATE_USERNAME="false")
+    @patch("django_clerk_users.utils.get_clerk_client")
+    def test_auto_generate_accepts_env_style_false_string(self, mock_get_client, db):
+        """Test environment-style false strings disable username generation."""
+        from django_clerk_users.utils import update_or_create_clerk_user
+
+        mock_clerk_user = MagicMock()
+        mock_clerk_user.email_addresses = []
+        mock_clerk_user.primary_email_address_id = None
+        mock_clerk_user.username = None
+        mock_clerk_user.first_name = "Env"
+        mock_clerk_user.last_name = "False"
+        mock_clerk_user.image_url = ""
+
+        mock_client = MagicMock()
+        mock_client.users.get.return_value = mock_clerk_user
+        mock_get_client.return_value = mock_client
+
+        user, created = update_or_create_clerk_user("clerk_env_false")
+
+        assert created is True
+        assert user.username is None
+
+    @override_settings(CLERK_AUTO_GENERATE_USERNAME=True)
+    @patch("django_clerk_users.utils.get_clerk_client")
     def test_no_auto_generate_when_username_exists(self, mock_get_client, db):
         """Test that existing Clerk username is preserved when auto-generate is enabled."""
         from django_clerk_users.utils import update_or_create_clerk_user
@@ -141,7 +196,9 @@ class TestGenerateUsernameForUser:
         assert user.username == result
         # Verify Clerk was called to sync
         mock_client.users.update.assert_called_once_with(
-            user_id="clerk_pk_test", username=result
+            user_id="clerk_pk_test",
+            username=result,
+            timeout_ms=10000,
         )
 
     @patch("django_clerk_users.utils.get_clerk_client")

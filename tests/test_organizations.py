@@ -6,6 +6,7 @@ import uuid
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 
 from django_clerk_users.organizations.models import (
     Organization,
@@ -92,6 +93,16 @@ class TestOrganizationModel:
     def test_organization_uid_is_uuid(self, organization):
         """Test that uid is a valid UUID."""
         assert isinstance(organization.uid, uuid.UUID)
+
+    def test_organization_uid_unique_constraint(self, organization, db):
+        """Test that public organization IDs are database-unique."""
+        with pytest.raises(IntegrityError):
+            Organization.objects.create(
+                clerk_id="org_duplicate_uid",
+                name="Duplicate UID Org",
+                slug="duplicate-uid-org",
+                uid=organization.uid,
+            )
 
     def test_organization_public_id(self, organization):
         """Test public_id property."""

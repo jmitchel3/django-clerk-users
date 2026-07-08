@@ -119,6 +119,50 @@ class TestDuplicateWebhook:
         result = is_duplicate_webhook("user.updated", "inst_abc")
         assert result is False
 
+    def test_duplicate_check_uses_atomic_cache_add(self):
+        """Test duplicate detection relies on cache.add atomicity."""
+        with patch(
+            "django_clerk_users.webhooks.handlers.cache.add", return_value=False
+        ) as add:
+            result = is_duplicate_webhook("user.created", "inst_atomic")
+
+        assert result is True
+        add.assert_called_once_with(
+            "webhook:user.created:inst_atomic",
+            True,
+            timeout=45,
+        )
+
+    @override_settings(CLERK_WEBHOOK_DEDUP_TIMEOUT="not-an-int")
+    def test_invalid_dedup_timeout_falls_back_to_default(self):
+        """Test invalid dedup timeout settings do not break webhook handling."""
+        with patch(
+            "django_clerk_users.webhooks.handlers.cache.add", return_value=True
+        ) as add:
+            result = is_duplicate_webhook("user.created", "inst_invalid_timeout")
+
+        assert result is False
+        add.assert_called_once_with(
+            "webhook:user.created:inst_invalid_timeout",
+            True,
+            timeout=45,
+        )
+
+    @override_settings(CLERK_WEBHOOK_DEDUP_TIMEOUT=0)
+    def test_non_positive_dedup_timeout_falls_back_to_default(self):
+        """Test non-positive dedup timeouts do not disable duplicate protection."""
+        with patch(
+            "django_clerk_users.webhooks.handlers.cache.add", return_value=True
+        ) as add:
+            result = is_duplicate_webhook("user.created", "inst_zero_timeout")
+
+        assert result is False
+        add.assert_called_once_with(
+            "webhook:user.created:inst_zero_timeout",
+            True,
+            timeout=45,
+        )
+
 
 class TestWebhookSignals:
     """Test webhook signal emission."""
@@ -233,6 +277,22 @@ class TestProcessWebhookEvent:
         ):
             result = process_webhook_event("user.created", {"id": "user_123"})
             assert result is False
+
+    def test_process_user_handler_none_result_is_failure(self):
+        """Test user handler failures are surfaced to the webhook view."""
+        with patch(
+            "django_clerk_users.webhooks.handlers.handle_user_created",
+            return_value=None,
+        ):
+            result = process_webhook_event("user.created", {"id": "user_123"})
+
+        assert result is False
+
+    def test_process_session_handler_false_result_is_failure(self):
+        """Test malformed session webhooks are surfaced as processing failures."""
+        result = process_webhook_event("session.created", {})
+
+        assert result is False
 
 
 class TestHandleUserDeleted:
@@ -514,6 +574,73 @@ class TestWebhookSecurity:
         request = RequestFactory().post("/")
         with pytest.raises(ClerkWebhookError, match="not configured"):
             verify_clerk_webhook(request)
+
+    @override_settings(CLERK_WEBHOOK_SIGNING_KEY="whsec_replace_me")
+    def test_verify_webhook_placeholder_signing_key_is_unconfigured(self):
+        """Test documented placeholder signing keys are not accepted."""
+        from django_clerk_users.webhooks.security import verify_clerk_webhook
+        from django_clerk_users.exceptions import ClerkWebhookError
+
+        request = RequestFactory().post("/")
+
+        with pytest.raises(ClerkWebhookError, match="not configured"):
+            verify_clerk_webhook(request)
+
+    def test_verify_webhook_explicit_placeholder_signing_key_is_unconfigured(self):
+        """Test explicit placeholder signing keys are not accepted."""
+        from django_clerk_users.webhooks.security import verify_clerk_webhook
+        from django_clerk_users.exceptions import ClerkWebhookError
+
+        request = RequestFactory().post("/")
+
+        with pytest.raises(ClerkWebhookError, match="not configured"):
+            verify_clerk_webhook(request, signing_key="whsec_test_mock_signing_key")
+
+    def test_verify_webhook_invalid_prefix_signing_key_is_unconfigured(self):
+        """Test invalid-looking signing keys are not accepted."""
+        from django_clerk_users.webhooks.security import verify_clerk_webhook
+        from django_clerk_users.exceptions import ClerkWebhookError
+
+        request = RequestFactory().post("/")
+
+        with pytest.raises(ClerkWebhookError, match="not configured"):
+            verify_clerk_webhook(request, signing_key="not-a-svix-secret")
+
+    @override_settings(CLERK_WEBHOOK_SIGNING_KEY=b"  whsec_replace_me  ")
+    def test_verify_webhook_bytes_placeholder_signing_key_is_unconfigured(self):
+        """Test byte-string placeholders are normalized before verification."""
+        from django_clerk_users.webhooks.security import verify_clerk_webhook
+        from django_clerk_users.exceptions import ClerkWebhookError
+
+        request = RequestFactory().post("/")
+
+        with pytest.raises(ClerkWebhookError, match="not configured"):
+            verify_clerk_webhook(request)
+
+    @override_settings(CLERK_WEBHOOK_SIGNING_KEY=b"\xff")
+    def test_verify_webhook_invalid_bytes_signing_key_is_unconfigured(self):
+        """Test undecodable byte-string signing keys are not accepted."""
+        from django_clerk_users.webhooks.security import verify_clerk_webhook
+        from django_clerk_users.exceptions import ClerkWebhookError
+
+        request = RequestFactory().post("/")
+
+        with pytest.raises(ClerkWebhookError, match="not configured"):
+            verify_clerk_webhook(request)
+
+    @patch("django_clerk_users.webhooks.security.Webhook")
+    def test_verify_webhook_trims_explicit_bytes_signing_key(self, mock_webhook):
+        """Test explicit byte-string signing keys are decoded and trimmed."""
+        from django_clerk_users.webhooks.security import verify_clerk_webhook
+
+        mock_instance = mock_webhook.return_value
+        mock_instance.verify.return_value = {"type": "user.created"}
+        request = RequestFactory().post("/")
+
+        payload = verify_clerk_webhook(request, signing_key=b"  whsec_endpoint  ")
+
+        assert payload == {"type": "user.created"}
+        mock_webhook.assert_called_once_with("whsec_endpoint")
 
     @override_settings(CLERK_OPTIONAL_WEBHOOK_SIGNING_KEY="")
     def test_verify_webhook_allow_missing_signing_key(self):

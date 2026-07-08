@@ -9,10 +9,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable
 
-from django_clerk_users.caching import (
-    get_cached_organization,
-    set_cached_organization,
-)
+from django_clerk_users.caching import get_cached_organization
 
 if TYPE_CHECKING:
     from django.http import HttpRequest, HttpResponse
@@ -108,23 +105,4 @@ class ClerkOrganizationMiddleware:
         Returns:
             The Organization instance or None if not found.
         """
-        from django_clerk_users.organizations.models import Organization
-
-        # Check cache first
-        cached = get_cached_organization(clerk_id)
-        if cached is not None:
-            if cached is False:
-                return None  # Cached as "not found"
-            return cached
-
-        # Query database
-        try:
-            organization = Organization.objects.get(
-                clerk_id=clerk_id,
-                is_active=True,
-            )
-            set_cached_organization(clerk_id, organization)
-            return organization
-        except Organization.DoesNotExist:
-            set_cached_organization(clerk_id, None)
-            return None
+        return get_cached_organization(clerk_id)

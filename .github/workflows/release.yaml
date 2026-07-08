@@ -32,10 +32,10 @@ jobs:
         cache-dependency-glob: uv.lock
 
     - name: Install dependencies
-      run: uv pip install --system tox tox-uv
+      run: uv sync --group dev --frozen
 
     - name: Run tox targets for ${{ matrix.python-version }}
-      run: tox run -f py$(echo ${{ matrix.python-version }} | tr -d .)
+      run: uv run tox run -f py$(echo ${{ matrix.python-version }} | tr -d .)
 
   release:
     needs: [tests]
@@ -49,9 +49,52 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --group dev --frozen
+
+      - name: Check lockfile
+        run: uv lock --check
+
+      - name: Check dependency consistency
+        run: uv run python -m pip check
+
+      - name: Run Ruff
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Check migrations
+        env:
+          DJANGO_SETTINGS_MODULE: tests.settings
+        run: uv run python -m django makemigrations --check --dry-run
 
       - name: Build
         run: uv build
+
+      - name: Check distribution artifacts
+        run: uv run python scripts/check_dist.py
+
+      - name: Smoke test installed wheel
+        run: |
+          uv run --no-sync python -m pip install --force-reinstall --no-deps dist/django_clerk_users-*.whl
+          uv run --no-sync python scripts/smoke_installed_wheel.py
+
+      - name: Live Clerk smoke test
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_WEBHOOK_SIGNING_KEY: ${{ secrets.CLERK_WEBHOOK_SIGNING_KEY }}
+          CLERK_FRONTEND_HOSTS: ${{ vars.CLERK_FRONTEND_HOSTS }}
+          CLERK_LIVE_SMOKE_LOOKUP_EMAIL: ${{ vars.CLERK_LIVE_SMOKE_LOOKUP_EMAIL }}
+        run: uv run --no-sync python scripts/live_clerk_smoke.py
 
       - uses: pypa/gh-action-pypi-publish@release/v1

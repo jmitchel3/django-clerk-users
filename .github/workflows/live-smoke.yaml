@@ -1,0 +1,56 @@
+name: Live Clerk Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookup_email:
+        description: Optional existing Clerk user email to verify.
+        required: false
+        type: string
+
+jobs:
+  live-smoke:
+    name: Live Clerk Smoke
+    runs-on: ubuntu-24.04
+    environment: release
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+
+    - name: Install dependencies
+      run: uv sync --group dev --frozen
+
+    - name: Check lockfile
+      run: uv lock --check
+
+    - name: Check dependency consistency
+      run: uv run python -m pip check
+
+    - name: Build package
+      run: uv build
+
+    - name: Check distribution artifacts
+      run: uv run python scripts/check_dist.py
+
+    - name: Install built wheel
+      run: uv run --no-sync python -m pip install --force-reinstall --no-deps dist/django_clerk_users-*.whl
+
+    - name: Smoke test installed wheel
+      run: uv run --no-sync python scripts/smoke_installed_wheel.py
+
+    - name: Live Clerk smoke test
+      env:
+        CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+        CLERK_WEBHOOK_SIGNING_KEY: ${{ secrets.CLERK_WEBHOOK_SIGNING_KEY }}
+        CLERK_FRONTEND_HOSTS: ${{ vars.CLERK_FRONTEND_HOSTS }}
+        CLERK_LIVE_SMOKE_LOOKUP_EMAIL: ${{ inputs.lookup_email || vars.CLERK_LIVE_SMOKE_LOOKUP_EMAIL }}
+      run: uv run --no-sync python scripts/live_clerk_smoke.py

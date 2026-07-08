@@ -13,17 +13,17 @@ import time
 from typing import TYPE_CHECKING, Callable
 
 from django.conf import settings
+from django.contrib.auth import BACKEND_SESSION_KEY, HASH_SESSION_KEY, SESSION_KEY
 from django.contrib.auth.models import AnonymousUser
+from django.middleware.csrf import rotate_token
+from django.utils.crypto import constant_time_compare
 
 from django_clerk_users.authentication.utils import (
     get_clerk_payload_from_request,
     get_or_create_user_from_payload,
 )
+from django_clerk_users.client import get_configured_clerk_secret_key
 from django_clerk_users.exceptions import ClerkAuthenticationError, ClerkTokenError
-from django_clerk_users.settings import (
-    CLERK_SECRET_KEY,
-    CLERK_SESSION_REVALIDATION_SECONDS,
-)
 
 if TYPE_CHECKING:
     from django.http import HttpRequest, HttpResponse
@@ -32,6 +32,28 @@ logger = logging.getLogger(__name__)
 
 # Authentication backend path
 CLERK_BACKEND = "django_clerk_users.authentication.ClerkBackend"
+DEFAULT_CLERK_SESSION_REVALIDATION_SECONDS = 300
+
+
+def _get_clerk_secret_key() -> str | None:
+    return get_configured_clerk_secret_key()
+
+
+def _get_session_revalidation_seconds() -> int:
+    raw_interval = getattr(
+        settings,
+        "CLERK_SESSION_REVALIDATION_SECONDS",
+        DEFAULT_CLERK_SESSION_REVALIDATION_SECONDS,
+    )
+    try:
+        return max(0, int(raw_interval))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid CLERK_SESSION_REVALIDATION_SECONDS value %r, using default %s",
+            raw_interval,
+            DEFAULT_CLERK_SESSION_REVALIDATION_SECONDS,
+        )
+        return DEFAULT_CLERK_SESSION_REVALIDATION_SECONDS
 
 
 class ClerkAuthMiddleware:
@@ -85,7 +107,7 @@ class ClerkAuthMiddleware:
         request.org = None  # type: ignore
 
         # Skip Clerk authentication if not configured
-        if not CLERK_SECRET_KEY:
+        if not _get_clerk_secret_key():
             return
 
         # Check if user is already authenticated via Django's standard auth
@@ -180,7 +202,7 @@ class ClerkAuthMiddleware:
         last_check = request.session.get("last_clerk_check", 0)
         now = int(time.time())
 
-        if now - last_check > CLERK_SESSION_REVALIDATION_SECONDS:
+        if now - last_check > _get_session_revalidation_seconds():
             # Re-validation needed - try to validate the token
             try:
                 payload = get_clerk_payload_from_request(request)
@@ -205,20 +227,39 @@ class ClerkAuthMiddleware:
         """
         Create a Django session for the authenticated user.
 
-        Note: We manually set session data instead of calling login() to avoid
-        triggering Django signals (like user_logged_in) that may conflict with
-        Clerk's authentication flow.
+        This mirrors Django's login() session state without sending
+        user_logged_in. Keeping Django's auth hash and session-key rotation
+        avoids the next AuthenticationMiddleware pass flushing the session.
         """
-        # Manually set session auth data (what login() would do internally)
-        request.session["_auth_user_id"] = str(user.pk)
-        request.session["_auth_user_backend"] = CLERK_BACKEND
-        request.session["_auth_user_hash"] = ""
+        session_auth_hash = ""
+        if hasattr(user, "get_session_auth_hash"):
+            session_auth_hash = user.get_session_auth_hash()
+
+        session_user_id = user._meta.pk.value_to_string(user)
+        if SESSION_KEY in request.session:
+            if request.session.get(SESSION_KEY) != session_user_id or (
+                session_auth_hash
+                and not constant_time_compare(
+                    request.session.get(HASH_SESSION_KEY, ""),
+                    session_auth_hash,
+                )
+            ):
+                request.session.flush()
+        else:
+            request.session.cycle_key()
+
+        # Manually set session auth data (what login() would do internally).
+        request.session[SESSION_KEY] = session_user_id
+        request.session[BACKEND_SESSION_KEY] = CLERK_BACKEND
+        request.session[HASH_SESSION_KEY] = session_auth_hash
 
         # Store Clerk-specific session data
         request.session["last_clerk_check"] = int(time.time())
         request.session["clerk_org_id"] = payload.get("org_id")
 
-        logger.debug(f"Created session for user {user.email}")
+        rotate_token(request)
+
+        logger.debug("Created session for user %s", user.email)
 
     def _clear_session(self, request: HttpRequest) -> None:
         """

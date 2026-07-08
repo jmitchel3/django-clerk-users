@@ -2,18 +2,22 @@
 Tests for django-clerk-users caching utilities.
 """
 
+from unittest.mock import patch
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 
 from django_clerk_users.caching import (
-    USER_CACHE_PREFIX,
     ORG_CACHE_PREFIX,
+    USER_CACHE_PREFIX,
+    get_cached_organization,
     get_cached_user,
     get_org_cache_key,
     get_user_cache_key,
     invalidate_clerk_user_cache,
     invalidate_organization_cache,
+    set_cached_organization,
     set_cached_user,
 )
 
@@ -117,6 +121,19 @@ class TestUserCaching:
         cache_key = get_user_cache_key("user_none")
         assert cache.get(cache_key) is False
 
+    def test_set_cached_user_uses_runtime_timeout(self, clerk_user, settings):
+        """Test CLERK_CACHE_TIMEOUT is read when caching."""
+        settings.CLERK_CACHE_TIMEOUT = "17"
+
+        with patch("django_clerk_users.caching.cache.set") as cache_set:
+            set_cached_user("user_test", clerk_user)
+
+        cache_set.assert_called_once_with(
+            get_user_cache_key("user_test"),
+            clerk_user,
+            timeout=17,
+        )
+
     def test_invalidate_user_cache(self, clerk_user):
         """Test invalidating user cache."""
         # Populate cache
@@ -135,6 +152,47 @@ class TestUserCaching:
 
 class TestOrganizationCaching:
     """Test organization caching functions."""
+
+    def test_get_cached_organization_from_db(self, db):
+        """Test getting an organization when not in cache fetches from DB."""
+        from django_clerk_users.organizations.models import Organization
+
+        organization = Organization.objects.create(
+            clerk_id="org_cache",
+            name="Cached Org",
+            slug="cached-org",
+        )
+
+        assert get_cached_organization("org_cache") == organization
+
+    def test_get_cached_organization_not_found(self, db):
+        """Test missing organizations are cached as False."""
+        organization = get_cached_organization("org_missing")
+
+        assert organization is None
+        assert cache.get(get_org_cache_key("org_missing")) is False
+
+    def test_get_cached_organization_propagates_unexpected_db_errors(self, db):
+        """Test database failures are not hidden as cache misses."""
+        with patch(
+            "django_clerk_users.organizations.models.Organization.objects.get",
+            side_effect=RuntimeError("database unavailable"),
+        ):
+            with pytest.raises(RuntimeError, match="database unavailable"):
+                get_cached_organization("org_error")
+
+    def test_set_cached_organization_uses_runtime_timeout(self, settings):
+        """Test CLERK_ORG_CACHE_TIMEOUT is read when caching."""
+        settings.CLERK_ORG_CACHE_TIMEOUT = "23"
+
+        with patch("django_clerk_users.caching.cache.set") as cache_set:
+            set_cached_organization("org_test", None)
+
+        cache_set.assert_called_once_with(
+            get_org_cache_key("org_test"),
+            False,
+            timeout=23,
+        )
 
     def test_invalidate_organization_cache(self):
         """Test invalidating organization cache."""

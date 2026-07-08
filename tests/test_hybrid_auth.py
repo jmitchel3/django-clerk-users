@@ -59,6 +59,12 @@ def middleware():
     return ClerkAuthMiddleware(get_response)
 
 
+@pytest.fixture(autouse=True)
+def configured_clerk_secret(settings):
+    """Use a non-placeholder key for tests that expect Clerk middleware to run."""
+    settings.CLERK_SECRET_KEY = "sk_test_unit_middleware_secret"
+
+
 def make_request_with_session(request_factory):
     """Create a request with a session."""
     request = request_factory.get("/")

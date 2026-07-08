@@ -7,6 +7,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from django.conf import settings
 from django.contrib.auth.models import BaseUserManager
 
 if TYPE_CHECKING:
@@ -154,10 +155,8 @@ class ClerkUserManager(BaseUserManager["AbstractClerkUser"]):
         Returns:
             A unique username string.
         """
-        from django_clerk_users.settings import CLERK_AUTO_GENERATE_USERNAME_PREFIX
-
         if prefix is None:
-            prefix = CLERK_AUTO_GENERATE_USERNAME_PREFIX
+            prefix = getattr(settings, "CLERK_AUTO_GENERATE_USERNAME_PREFIX", "user")
 
         # Try up to 10 times to generate a unique username
         for _ in range(10):

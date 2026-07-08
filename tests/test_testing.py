@@ -283,7 +283,8 @@ class TestClerkTestClient:
 
         assert session["id"] == "sess_test123"
         mock_clerk.sessions.create.assert_called_once_with(
-            request={"user_id": "user_test123"}
+            request={"user_id": "user_test123"},
+            timeout_ms=10000,
         )
 
     def test_get_session_token(self):
@@ -318,7 +319,10 @@ class TestClerkTestClient:
         result = client.delete_user("user_test123")
 
         assert result is True
-        mock_clerk.users.delete.assert_called_once_with(user_id="user_test123")
+        mock_clerk.users.delete.assert_called_once_with(
+            user_id="user_test123",
+            timeout_ms=10000,
+        )
 
     def test_delete_user_failure(self):
         """Test handling delete failure."""

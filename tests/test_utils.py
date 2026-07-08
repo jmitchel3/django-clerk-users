@@ -2,11 +2,14 @@
 Tests for django-clerk-users utils module.
 """
 
+from contextlib import nullcontext
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.db import IntegrityError
 
 from django_clerk_users.caching import get_user_cache_key, set_cached_user
 from django_clerk_users.exceptions import (
@@ -15,6 +18,8 @@ from django_clerk_users.exceptions import (
     ClerkUserNotFoundError,
 )
 from django_clerk_users.utils import (
+    _clerk_list_data,
+    _clerk_timeout_options,
     absorb_clerk_user_duplicate,
     get_clerk_user,
     get_user_metadata,
@@ -78,6 +83,38 @@ def make_mock_clerk_user(
     return mock_user
 
 
+class TestClerkTimeoutOptions:
+    """Test Clerk SDK timeout option handling in utility paths."""
+
+    def test_uses_runtime_timeout_setting(self, settings):
+        settings.CLERK_API_TIMEOUT_MS = "1234"
+
+        assert _clerk_timeout_options() == {"timeout_ms": 1234}
+
+    def test_invalid_timeout_falls_back_to_default(self, settings):
+        settings.CLERK_API_TIMEOUT_MS = "not-an-int"
+
+        assert _clerk_timeout_options() == {"timeout_ms": 10000}
+
+
+class TestClerkListData:
+    """Test Clerk SDK list response normalization."""
+
+    def test_accepts_plain_list_response(self):
+        assert _clerk_list_data(["a", "b"]) == ["a", "b"]
+
+    def test_accepts_paginated_data_attribute(self):
+        response = SimpleNamespace(data=("a", "b"))
+
+        assert _clerk_list_data(response) == ["a", "b"]
+
+    def test_accepts_mapping_data_response(self):
+        assert _clerk_list_data({"data": ("a", "b")}) == ["a", "b"]
+
+    def test_none_response_is_empty(self):
+        assert _clerk_list_data(None) == []
+
+
 class TestUpdateOrCreateClerkUser:
     """Test update_or_create_clerk_user function."""
 
@@ -103,6 +140,45 @@ class TestUpdateOrCreateClerkUser:
         assert user.first_name == "New"
         assert user.last_name == "Person"
 
+    def test_create_recovers_from_concurrent_clerk_id_race(self, db, mock_clerk_client):
+        """Test concurrent first-login races return the winning local user."""
+        User = get_user_model()
+        mock_clerk_user = make_mock_clerk_user(
+            "user_race",
+            email="race@example.com",
+            first_name="Race",
+            last_name="Winner",
+        )
+        mock_clerk_client.users.get.return_value = mock_clerk_user
+        original_create = User.objects.create
+
+        def create_winning_row_then_raise(*args, **kwargs):
+            original_create(*args, **kwargs)
+            raise IntegrityError("duplicate clerk_id")
+
+        with (
+            patch(
+                "django_clerk_users.utils.get_clerk_client",
+                return_value=mock_clerk_client,
+            ),
+            patch(
+                "django_clerk_users.utils.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch.object(
+                User.objects,
+                "create",
+                side_effect=create_winning_row_then_raise,
+            ),
+        ):
+            user, created = update_or_create_clerk_user("user_race")
+
+        assert created is False
+        assert user.clerk_id == "user_race"
+        assert user.email == "race@example.com"
+        assert User.objects.filter(clerk_id="user_race").count() == 1
+        assert get_clerk_user("user_race").pk == user.pk
+
     def test_update_existing_user(self, clerk_user, mock_clerk_client):
         """Test updating an existing user from Clerk."""
         mock_clerk_user = make_mock_clerk_user(
@@ -122,6 +198,35 @@ class TestUpdateOrCreateClerkUser:
         assert created is False
         assert user.email == "updated@example.com"
         assert user.first_name == "Updated"
+
+    def test_update_existing_user_email_conflict_is_not_treated_as_race(
+        self, db, mock_clerk_client
+    ):
+        """Test non-create uniqueness errors still surface as Clerk sync failures."""
+        User = get_user_model()
+        user = User.objects.create_user(
+            clerk_id="user_email_conflict",
+            email="current@example.com",
+        )
+        User.objects.create_user(email="taken@example.com")
+
+        mock_clerk_user = make_mock_clerk_user(
+            "user_email_conflict",
+            email="taken@example.com",
+        )
+        mock_clerk_client.users.get.return_value = mock_clerk_user
+
+        with (
+            patch(
+                "django_clerk_users.utils.get_clerk_client",
+                return_value=mock_clerk_client,
+            ),
+            pytest.raises(ClerkAPIError),
+        ):
+            update_or_create_clerk_user("user_email_conflict")
+
+        user.refresh_from_db()
+        assert user.email == "current@example.com"
 
     def test_user_not_found_in_clerk(self, db, mock_clerk_client):
         """Test handling when user not found in Clerk."""
@@ -343,9 +448,7 @@ class TestAbsorbClerkUserDuplicate:
             clerk_id=None,
         )
 
-        assert (
-            absorb_clerk_user_duplicate(target, email="claimed@example.com") is False
-        )
+        assert absorb_clerk_user_duplicate(target, email="claimed@example.com") is False
 
     def test_absorbs_fresh_duplicate_by_email(self, db):
         User = get_user_model()
