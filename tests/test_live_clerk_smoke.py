@@ -37,6 +37,38 @@ def test_live_clerk_smoke_reports_missing_required_env(monkeypatch, capsys):
     assert "CLERK_WEBHOOK_SIGNING_KEY must be a real Svix signing secret" in output
 
 
+def test_live_clerk_smoke_allow_missing_env_rejects_partial_configuration(
+    monkeypatch,
+):
+    """Test optional release smoke mode still fails when only one secret is set."""
+    monkeypatch.setenv("CLERK_SECRET_KEY", "sk_test_live_smoke_example")
+    monkeypatch.delenv("CLERK_WEBHOOK_SIGNING_KEY", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["live_clerk_smoke.py", "--allow-missing-env"],
+    )
+
+    with pytest.raises(SystemExit, match="CLERK_WEBHOOK_SIGNING_KEY"):
+        live_clerk_smoke.main()
+
+
+def test_live_clerk_smoke_allow_missing_env_rejects_invalid_configuration(
+    monkeypatch,
+):
+    """Test optional release smoke mode still fails for configured placeholders."""
+    monkeypatch.setenv("CLERK_SECRET_KEY", "sk_test_mock_secret_key")
+    monkeypatch.setenv("CLERK_WEBHOOK_SIGNING_KEY", "whsec_replace_me")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["live_clerk_smoke.py", "--allow-missing-env"],
+    )
+
+    with pytest.raises(SystemExit, match="CLERK_SECRET_KEY"):
+        live_clerk_smoke.main()
+
+
 def test_live_clerk_smoke_accepts_realistic_secret_shapes(monkeypatch):
     """Test configured live-looking secrets pass preflight validation."""
     monkeypatch.setenv("CLERK_SECRET_KEY", "sk_test_live_smoke_example")

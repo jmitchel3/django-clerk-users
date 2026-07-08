@@ -95,6 +95,6 @@ jobs:
           CLERK_WEBHOOK_SIGNING_KEY: ${{ secrets.CLERK_WEBHOOK_SIGNING_KEY }}
           CLERK_FRONTEND_HOSTS: ${{ vars.CLERK_FRONTEND_HOSTS }}
           CLERK_LIVE_SMOKE_LOOKUP_EMAIL: ${{ vars.CLERK_LIVE_SMOKE_LOOKUP_EMAIL }}
-        run: uv run --no-sync python scripts/live_clerk_smoke.py
+        run: uv run --no-sync python scripts/live_clerk_smoke.py --allow-missing-env
 
       - uses: pypa/gh-action-pypi-publish@release/v1

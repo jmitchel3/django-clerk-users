@@ -117,6 +117,12 @@ def _missing_reasons() -> list[str]:
     return reasons
 
 
+def _live_credentials_are_unset() -> bool:
+    return not _env_secret("CLERK_SECRET_KEY") and not _env_secret(
+        "CLERK_WEBHOOK_SIGNING_KEY"
+    )
+
+
 def _django_settings_kwargs() -> dict[str, Any]:
     return {
         "SECRET_KEY": "live-clerk-smoke",
@@ -243,7 +249,7 @@ def main() -> int:
         message = "Live Clerk smoke check not configured:\n  - " + "\n  - ".join(
             missing_reasons
         )
-        if args.allow_missing_env:
+        if args.allow_missing_env and _live_credentials_are_unset():
             print(message)
             return 0
         raise SystemExit(message)

@@ -2,8 +2,10 @@
 
 All notable changes to `django-clerk-users` are documented here.
 
-## 0.3.1 - 2026-07-08
+## 0.3.2 - 2026-07-08
 
+- Fixed the release workflow so publishing is not blocked when optional live
+  Clerk smoke-test credentials are not configured in the release environment.
 - Added production release checks for built artifacts, installed wheels, and
   read-only live Clerk smoke validation.
 - Updated package metadata from beta to production/stable.
