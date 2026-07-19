@@ -2,7 +2,7 @@
 
 All notable changes to `django-clerk-users` are documented here.
 
-## Unreleased
+## 0.3.3 - 2026-07-18
 
 - Exposed the active Clerk organization id as `request.org` from the DRF
   `ClerkAuthentication` class, mirroring what `ClerkAuthMiddleware` sets on the
