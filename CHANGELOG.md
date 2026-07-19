@@ -2,6 +2,16 @@
 
 All notable changes to `django-clerk-users` are documented here.
 
+## 0.3.3 - 2026-07-18
+
+- Exposed the active Clerk organization id as `request.org` from the DRF
+  `ClerkAuthentication` class, mirroring what `ClerkAuthMiddleware` sets on the
+  WSGI path. Previously the active organization was only available when using
+  the WSGI auth middleware, so DRF-authenticated (bearer-token) requests had no
+  way to resolve the tenant/organization without extra wiring. The id is also
+  set on the underlying Django `HttpRequest` so middleware and non-DRF
+  consumers can read it.
+
 ## 0.3.2 - 2026-07-08
 
 - Fixed the release workflow so publishing is not blocked when optional live

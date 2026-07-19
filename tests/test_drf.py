@@ -130,6 +130,73 @@ class TestClerkAuthentication:
         assert hasattr(request, "clerk_payload")
         assert request.clerk_payload == payload
 
+    def test_authenticate_exposes_active_org(self, request_factory, clerk_user):
+        """The active Clerk org id from the token is exposed as request.org,
+        mirroring what ClerkAuthMiddleware does on the WSGI path."""
+        from django_clerk_users.authentication.drf import ClerkAuthentication
+
+        auth = ClerkAuthentication()
+        request = request_factory.get("/")
+        payload = {"sub": "user_drf123", "org_id": "org_test"}
+
+        with patch(
+            "django_clerk_users.authentication.drf.get_clerk_payload_from_request",
+            return_value=payload,
+        ):
+            with patch(
+                "django_clerk_users.authentication.drf.get_or_create_user_from_payload",
+                return_value=(clerk_user, False),
+            ):
+                auth.authenticate(request)
+
+        assert request.org == "org_test"
+
+    def test_authenticate_org_none_when_absent(self, request_factory, clerk_user):
+        """request.org is None when the token carries no org_id."""
+        from django_clerk_users.authentication.drf import ClerkAuthentication
+
+        auth = ClerkAuthentication()
+        request = request_factory.get("/")
+        payload = {"sub": "user_drf123"}
+
+        with patch(
+            "django_clerk_users.authentication.drf.get_clerk_payload_from_request",
+            return_value=payload,
+        ):
+            with patch(
+                "django_clerk_users.authentication.drf.get_or_create_user_from_payload",
+                return_value=(clerk_user, False),
+            ):
+                auth.authenticate(request)
+
+        assert request.org is None
+
+    def test_authenticate_exposes_org_on_underlying_request(
+        self, request_factory, clerk_user
+    ):
+        """Given a DRF Request wrapper, org is also set on the underlying
+        Django HttpRequest so middleware / non-DRF consumers can read it."""
+        from rest_framework.request import Request
+
+        from django_clerk_users.authentication.drf import ClerkAuthentication
+
+        auth = ClerkAuthentication()
+        drf_request = Request(request_factory.get("/"))
+        payload = {"sub": "user_drf123", "org_id": "org_wrap"}
+
+        with patch(
+            "django_clerk_users.authentication.drf.get_clerk_payload_from_request",
+            return_value=payload,
+        ):
+            with patch(
+                "django_clerk_users.authentication.drf.get_or_create_user_from_payload",
+                return_value=(clerk_user, False),
+            ):
+                auth.authenticate(drf_request)
+
+        assert drf_request.org == "org_wrap"
+        assert drf_request._request.org == "org_wrap"
+
     def test_authenticate_invalid_token_raises(self, request_factory):
         """Test that invalid token raises AuthenticationFailed."""
         from django_clerk_users.authentication.drf import ClerkAuthentication
