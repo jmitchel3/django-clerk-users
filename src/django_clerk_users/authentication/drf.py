@@ -106,8 +106,21 @@ class ClerkAuthentication(_BaseAuthentication):
         if not user.is_active:
             raise exceptions.AuthenticationFailed("User is inactive.")
 
-        # Attach the Clerk payload to the request for later use
+        # Attach the Clerk payload and the active organization id to the request
+        # for later use. ``org`` mirrors what ClerkAuthMiddleware sets on the
+        # WSGI path (request.org = payload["org_id"]); without it the active
+        # Clerk organization is invisible on the DRF-authenticated path, so any
+        # org-scoped tenancy built on top of DRF has no tenant to key off. The
+        # org id comes straight from the Clerk-signed token, so it is
+        # trustworthy without a separate membership check.
+        org_id = payload.get("org_id")
         request.clerk_payload = payload  # type: ignore
+        request.org = org_id  # type: ignore
+        # Also expose it on the underlying Django HttpRequest so consumers that
+        # read the unwrapped request (e.g. middleware, non-DRF code) see it too.
+        underlying = getattr(request, "_request", None)
+        if underlying is not None and underlying is not request:
+            underlying.org = org_id
 
         return (user, payload)
 
