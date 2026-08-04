@@ -5,11 +5,23 @@ All notable changes to `django-clerk-users` are documented here.
 ## 0.3.4 - 2026-08-03
 
 - Declared `cryptography>=45` with no upper bound so the package tracks new
-  `cryptography` releases instead of being held to a pinned version.
+  `cryptography` releases instead of being held to a pinned version. A release
+  test now fails if anything reintroduces an upper bound.
 - Raised the `clerk-backend-api` floor to `>=6.0.1`, which lifts that SDK's own
   `cryptography` ceiling from `<46` to `<49` and lets resolvers pick up newer
   releases. `cryptography` 50 is verified working against the test suite but is
-  still blocked by the `clerk-backend-api` upper bound.
+  still capped by the `clerk-backend-api` upper bound, which this package does
+  not control.
+- Added `scripts/check_cryptography_ceiling.py` and a scheduled
+  `Cryptography Watch` workflow that reports where the upstream ceiling sits
+  and fails once it lifts, so the `clerk-backend-api` floor can be raised
+  promptly.
+- Added a `py313-cryptolatest` tox environment that runs the suite against the
+  newest `cryptography` regardless of the upstream cap.
+- Added `timeout-minutes` to every GitHub Actions job so a hung runner cannot
+  burn the full six-hour default.
+- Pinned `ruff` to the 0.14 line for now; 0.15 widened its default rule set and
+  that lint expansion needs its own change.
 
 ## 0.3.3 - 2026-07-18
 

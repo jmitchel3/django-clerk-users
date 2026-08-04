@@ -9,6 +9,7 @@ jobs:
   tests:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     strategy:
       matrix:
@@ -40,6 +41,7 @@ jobs:
   release:
     needs: [tests]
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     environment: release
 
     permissions:

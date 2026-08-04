@@ -1,0 +1,77 @@
+name: Cryptography Watch
+
+# This package declares `cryptography>=45` with no upper bound, so it never
+# blocks a new cryptography release itself. `clerk-backend-api` does cap it,
+# and that cap is what resolvers actually obey. These jobs answer:
+#
+#   ceiling — has the upstream cap lifted yet? (red means: go raise the floor)
+#   canary  — does the suite still pass on the newest cryptography anyway?
+
+on:
+  workflow_dispatch:
+  schedule:
+  # Mondays at 06:00 UTC.
+  - cron: '0 6 * * 1'
+  pull_request:
+    paths:
+    - 'scripts/check_cryptography_ceiling.py'
+    - '.github/workflows/cryptography-watch.yaml'
+
+concurrency:
+  group: cryptography-watch-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  ceiling:
+    name: Upstream ceiling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+
+    - name: Install dependencies
+      timeout-minutes: 5
+      run: uv sync --group dev --frozen
+
+    # Fails once clerk-backend-api accepts the newest cryptography, which is
+    # the signal to raise the clerk-backend-api floor and re-lock.
+    - name: Check whether the cryptography ceiling has lifted
+      timeout-minutes: 3
+      run: uv run python scripts/check_cryptography_ceiling.py --fail-when-lifted
+
+  canary:
+    name: Newest cryptography
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+
+    - uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+
+    - name: Install dependencies
+      timeout-minutes: 5
+      run: uv sync --group dev --frozen
+
+    # Force-installs the newest cryptography over the upstream cap so we learn
+    # about a real incompatibility before the cap lifts, not after.
+    - name: Run the suite against the newest cryptography
+      timeout-minutes: 15
+      run: uv run tox -e py313-cryptolatest

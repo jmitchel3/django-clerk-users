@@ -36,6 +36,18 @@ This package supports Python 3.12 through 3.14 and Django 4.2, 5.2, and 6.0.
 CI installs and tests the built wheel across those supported Django/Python
 combinations and exercises the optional Django REST Framework extra.
 
+`cryptography` is declared as `>=45` with **no upper bound**, so this package
+never holds you back from a newer release. Any ceiling you hit in practice
+comes from `clerk-backend-api`, which pins its own `cryptography` range. A
+scheduled workflow reports where that ceiling sits, and a `py313-cryptolatest`
+tox environment runs the test suite against the newest `cryptography`
+regardless of the ceiling:
+
+```bash
+uv run python scripts/check_cryptography_ceiling.py
+uv run tox -e py313-cryptolatest
+```
+
 ## Quick Start
 
 ### 1. Add to installed apps

@@ -12,6 +12,7 @@ jobs:
   live-smoke:
     name: Live Clerk Smoke
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     environment: release
 
     steps:

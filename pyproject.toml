@@ -56,6 +56,7 @@ packages = [ "src/django_clerk_users" ]
 
 [dependency-groups]
 dev = [
+  "packaging>=24",
   "pip>=25.3",
   "pre-commit>=4.4",
   "pytest>=9",
@@ -63,7 +64,10 @@ dev = [
   "pytest-django>=4.9",
   "python-dotenv>=1",
   "rav>=0.1.1",
-  "ruff>=0.14.1",
+  # Pinned to the 0.14 line: ruff 0.15 widened its default rule set, which
+  # flags ~184 pre-existing findings across src/ and migrations. Widening the
+  # lint surface is its own change, not a dependency bump.
+  "ruff>=0.14.1,<0.15",
   "tox>=4.32",
   "tox-uv>=1.29",
 ]
@@ -114,6 +118,7 @@ env_list =
     py314-django42
     py314-django52
     py314-django60
+    py313-cryptolatest
 
 [testenv]
 package = wheel
@@ -129,6 +134,10 @@ extras =
     drf: drf
 set_env =
     !drf: DJANGO_CLERK_USERS_REQUIRE_WHEEL_IMPORT = 1
+allowlist_externals =
+    cryptolatest: uv
+commands_pre =
+    cryptolatest: uv pip install --python {envpython} --no-deps --upgrade cryptography
 commands =
     !drf: coverage run --data-file=.coverage.{envname} -m pytest -o pythonpath= {posargs}
     drf: coverage run --data-file=.coverage.{envname} -m pytest -o pythonpath= tests/test_drf.py tests/test_drf_combined.py {posargs}

@@ -43,6 +43,7 @@ jobs:
   quality:
     name: Quality
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
     - uses: actions/checkout@v4
@@ -91,6 +92,7 @@ jobs:
   tests:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     strategy:
       matrix:
@@ -130,6 +132,7 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     needs: tests
     steps:
       - uses: actions/checkout@v4

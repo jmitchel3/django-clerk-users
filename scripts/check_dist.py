@@ -120,7 +120,10 @@ def _check_wheel(version: str) -> None:
             "Classifier: Framework :: Django :: 4.2",
             "Classifier: Framework :: Django :: 5.2",
             "Classifier: Framework :: Django :: 6.0",
-            "Requires-Dist: clerk-backend-api>=1",
+            "Requires-Dist: clerk-backend-api>=6.0.1",
+            # Deliberately unbounded so new cryptography releases are usable
+            # as soon as clerk-backend-api stops capping them.
+            "Requires-Dist: cryptography>=45",
             "Requires-Dist: django<7.0,>=4.2",
             "Requires-Dist: svix>=1",
             "Provides-Extra: drf",
@@ -150,6 +153,7 @@ def _check_sdist(version: str) -> None:
         f"{prefix}LICENSE",
         f"{prefix}README.md",
         f"{prefix}pyproject.toml",
+        f"{prefix}scripts/check_cryptography_ceiling.py",
         f"{prefix}scripts/check_dist.py",
         f"{prefix}scripts/live_clerk_smoke.py",
         f"{prefix}scripts/smoke_installed_wheel.py",

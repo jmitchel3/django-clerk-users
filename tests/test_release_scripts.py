@@ -5,8 +5,11 @@ Tests for release validation helper scripts.
 from __future__ import annotations
 
 import importlib.metadata
+import tomllib
+from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 from scripts import check_dist, smoke_installed_wheel
 
@@ -91,3 +94,29 @@ def test_installed_wheel_smoke_accepts_installed_distribution(monkeypatch, tmp_p
     monkeypatch.setattr(django_clerk_users, "__file__", str(installed_file))
 
     assert smoke_installed_wheel._verify_installed_distribution() == "1.2.3"
+
+
+def test_cryptography_requirement_stays_unbounded():
+    """Test nothing re-caps cryptography, so new releases stay usable.
+
+    This package must never be the reason a consumer is held back from a newer
+    ``cryptography``. Any upper bound in effect comes from ``clerk-backend-api``,
+    which we do not control; see ``scripts/check_cryptography_ceiling.py``.
+    """
+    pyproject = tomllib.loads(
+        (Path(check_dist.__file__).resolve().parents[1] / "pyproject.toml").read_text()
+    )
+    declared = [
+        Requirement(raw)
+        for raw in pyproject["project"]["dependencies"]
+        if Requirement(raw).name.lower() == "cryptography"
+    ]
+
+    assert declared, "cryptography should stay an explicit dependency"
+
+    capping = [
+        str(spec)
+        for spec in declared[0].specifier
+        if spec.operator in {"<", "<=", "==", "==="}
+    ]
+    assert not capping, f"cryptography must not be capped, found {capping}"
