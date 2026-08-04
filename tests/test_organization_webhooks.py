@@ -28,6 +28,7 @@ from django_clerk_users.organizations.webhooks import (
     process_organization_event,
     update_or_create_organization,
 )
+from django_clerk_users.organizations import webhooks as organization_webhooks
 
 
 @pytest.fixture
@@ -319,3 +320,186 @@ def test_process_organization_event_returns_false_for_handler_exception():
             process_organization_event("organization.deleted", {"id": "org_123"})
             is False
         )
+
+
+def test_organization_payload_helpers_cover_object_and_invalid_timestamp_paths():
+    source = SimpleNamespace(name="Object Org", created_at="invalid")
+
+    assert organization_webhooks._has_value(source, "name") is True
+    assert organization_webhooks._has_value(source, "slug") is False
+    assert organization_webhooks._organization_defaults(source) == {
+        "name": "Object Org",
+        "slug": "",
+        "image_url": "",
+        "members_count": 0,
+        "pending_invitations_count": 0,
+        "max_allowed_memberships": 0,
+        "public_metadata": {},
+        "private_metadata": {},
+    }
+
+
+def test_update_or_create_organization_rejects_missing_and_remote_missing_org(db):
+    assert organization_webhooks.update_or_create_organization_from_data({}) == (
+        None,
+        False,
+    )
+
+    client = MagicMock()
+    client.organizations.get.return_value = None
+    with patch("django_clerk_users.client.get_clerk_client", return_value=client):
+        assert update_or_create_organization("org_missing") == (None, False)
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        handle_organization_created,
+        handle_organization_updated,
+        handle_organization_deleted,
+        handle_membership_created,
+        handle_membership_updated,
+        handle_membership_deleted,
+        handle_invitation_created,
+        handle_invitation_accepted,
+        handle_invitation_revoked,
+    ],
+)
+def test_organization_handlers_reject_missing_identifiers(handler, db):
+    assert handler({}) is False
+
+
+def test_organization_create_and_update_report_empty_upsert(db):
+    with patch.object(
+        organization_webhooks,
+        "update_or_create_organization_from_data",
+        return_value=(None, False),
+    ):
+        assert handle_organization_created({"id": "org_empty_create"}) is False
+        assert handle_organization_updated({"id": "org_empty_update"}) is False
+
+
+def test_organization_delete_acknowledges_missing_local_org(db):
+    assert handle_organization_deleted({"id": "org_not_local"}) is True
+
+
+def test_membership_created_fetches_non_mapping_org_and_missing_user(
+    organization, user
+):
+    class OrganizationPayload:
+        def get(self, key, default=None):
+            return {"id": "org_remote_only"}.get(key, default)
+
+    remote_payload = {
+        "id": "mem_remote_org",
+        "organization": OrganizationPayload(),
+        "public_user_data": {"user_id": user.clerk_id},
+    }
+    with patch.object(
+        organization_webhooks,
+        "update_or_create_organization",
+        return_value=(organization, False),
+    ) as update_org:
+        assert handle_membership_created(remote_payload) is True
+
+    update_org.assert_called_once_with("org_remote_only")
+
+    missing_user_payload = {
+        "id": "mem_remote_user",
+        "organization": {"id": organization.clerk_id},
+        "public_user_data": {"user_id": "user_remote_only"},
+    }
+    synced_user = get_user_model().objects.create_user(
+        clerk_id="user_synced_locally", email="synced-locally@example.com"
+    )
+    with patch(
+        "django_clerk_users.utils.update_or_create_clerk_user",
+        return_value=(synced_user, False),
+    ) as update_user:
+        assert handle_membership_created(missing_user_payload) is True
+
+    update_user.assert_called_once_with("user_remote_only")
+
+
+def test_missing_membership_and_invitation_records_are_acknowledged(db):
+    assert handle_membership_updated({"id": "mem_missing"}) is True
+    assert handle_membership_deleted({"id": "mem_missing"}) is True
+    assert handle_invitation_accepted({"id": "inv_missing"}) is True
+    assert handle_invitation_revoked({"id": "inv_missing"}) is True
+
+
+def test_invitation_created_fetches_org_and_allows_missing_inviter(organization):
+    payload = {
+        "id": "inv_remote_org",
+        "organization_id": "org_remote_only",
+        "email_address": "remote@example.com",
+    }
+    with patch.object(
+        organization_webhooks,
+        "update_or_create_organization",
+        return_value=(organization, False),
+    ) as update_org:
+        assert handle_invitation_created(payload) is True
+
+    update_org.assert_called_once_with("org_remote_only")
+    invitation = OrganizationInvitation.objects.get(
+        clerk_invitation_id="inv_remote_org"
+    )
+    assert invitation.inviter is None
+
+
+def test_organization_handler_exceptions_return_false(db):
+    with patch.object(
+        organization_webhooks,
+        "update_or_create_organization_from_data",
+        side_effect=RuntimeError("upsert failed"),
+    ):
+        assert handle_organization_created({"id": "org_create_failed"}) is False
+
+    with patch.object(
+        organization_webhooks,
+        "invalidate_organization_cache",
+        side_effect=RuntimeError("cache failed"),
+    ):
+        assert handle_organization_updated({"id": "org_update_failed"}) is False
+        assert handle_organization_deleted({"id": "org_delete_failed"}) is False
+
+    with patch.object(
+        Organization.objects, "filter", side_effect=RuntimeError("query failed")
+    ):
+        assert (
+            handle_membership_created(
+                {
+                    "id": "mem_create_failed",
+                    "organization": {"id": "org_failed"},
+                    "public_user_data": {"user_id": "user_failed"},
+                }
+            )
+            is False
+        )
+        assert (
+            handle_invitation_created(
+                {
+                    "id": "inv_create_failed",
+                    "organization_id": "org_failed",
+                    "email_address": "failed@example.com",
+                }
+            )
+            is False
+        )
+
+    with patch.object(
+        OrganizationMember.objects,
+        "filter",
+        side_effect=RuntimeError("membership query failed"),
+    ):
+        assert handle_membership_updated({"id": "mem_update_failed"}) is False
+        assert handle_membership_deleted({"id": "mem_delete_failed"}) is False
+
+    with patch.object(
+        OrganizationInvitation.objects,
+        "filter",
+        side_effect=RuntimeError("invitation query failed"),
+    ):
+        assert handle_invitation_accepted({"id": "inv_accept_failed"}) is False
+        assert handle_invitation_revoked({"id": "inv_revoke_failed"}) is False
