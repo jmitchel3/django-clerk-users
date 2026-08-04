@@ -19,6 +19,7 @@ from django_clerk_users.clerk_api.objects import (
     clerk_value,
     to_plain_data,
 )
+from django_clerk_users.clerk_api.resources import ClerkClient, paginate
 from django_clerk_users.clerk_api.transport import (
     CLERK_API_BASE_URL,
     CLERK_API_DEFAULT_TIMEOUT_MS,
@@ -28,8 +29,10 @@ from django_clerk_users.clerk_api.transport import (
 __all__ = [
     "CLERK_API_BASE_URL",
     "CLERK_API_DEFAULT_TIMEOUT_MS",
+    "ClerkClient",
     "ClerkObject",
     "ClerkTransport",
     "clerk_value",
+    "paginate",
     "to_plain_data",
 ]

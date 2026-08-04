@@ -17,6 +17,12 @@ All notable changes to `django-clerk-users` are documented here.
   object is now always constructed. An empty allowlist is normalized to `None`
   rather than `[]`, because the SDK skips the `azp` check only for `None` and
   would treat an empty list as an allowlist matching nothing.
+- Added `django_clerk_users.clerk_api.ClerkClient`, a thin REST client covering
+  all 18 Clerk operations this package consumes, plus a `paginate()` helper for
+  list endpoints. It mirrors the SDK's resource attribute names and argument
+  styles, so it can be passed as `clerk_client=` anywhere the SDK client was
+  expected. Nothing is cut over to it yet, so no runtime behavior changes.
+
 - **Fixed `request.org` being `None` for every v2 session token.** v2 tokens
   carry the active organization in a nested `o` claim rather than a top-level
   `org_id`, but `ClerkAuthMiddleware` and the DRF authentication classes all
