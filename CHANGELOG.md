@@ -4,6 +4,32 @@ All notable changes to `django-clerk-users` are documented here.
 
 ## Unreleased
 
+### Breaking
+
+- **`clerk-backend-api` moved to an optional `[sdk]` extra and is no longer
+  installed by default.** It pins `cryptography>=45,<49`, and that pin is what
+  resolvers obey, so every default install was held to `cryptography` 48.x
+  while 50.x was current. A base install now resolves `cryptography` 50.x.
+
+  Server-side Clerk API calls use a new built-in thin REST client by default.
+  If you need the official SDK, install `django-clerk-users[sdk]` **and** set
+  `CLERK_CLIENT_BACKEND = "sdk"`.
+
+  Installing the extra alone is deliberately not enough. Selection is by
+  setting only, never by importability: `get_clerk_client()` is public API, and
+  choosing an implementation based on what happens to be installed would make
+  response models, error types, retries, and available methods depend on the
+  environment, and would silently restore the `cryptography` ceiling for anyone
+  who picked up `clerk-backend-api` transitively. Selecting `"sdk"` without the
+  extra installed raises `ClerkConfigurationError` rather than falling back.
+
+  Session token verification does not use the SDK on either backend.
+
+- Added a `NOTICE` file recording MIT attribution for the verification and org
+  claim logic ported from `clerk-backend-api` 6.0.1.
+
+### Other changes
+
 - Fixed `revoke_clerk_user_sessions` silently leaving sessions active when a
   user had more than one page of them. The listing call sent no `limit` or
   `offset` and ran no pagination loop, so only the Clerk API's default first
@@ -22,7 +48,6 @@ All notable changes to `django-clerk-users` are documented here.
   list endpoints. It mirrors the SDK's resource attribute names and argument
   styles, so it can be passed as `clerk_client=` anywhere the SDK client was
   expected. Nothing is cut over to it yet, so no runtime behavior changes.
-
 - **Fixed `request.org` being `None` for every v2 session token.** v2 tokens
   carry the active organization in a nested `o` claim rather than a top-level
   `org_id`, but `ClerkAuthMiddleware` and the DRF authentication classes all
@@ -42,7 +67,6 @@ All notable changes to `django-clerk-users` are documented here.
   Django startup.
 - Declared `pyjwt` as a direct dependency. It is the same library the Clerk SDK
   uses internally; it just no longer arrives as a transitive.
-
 - Added `django_clerk_users.clerk_api`, a thin Clerk HTTP client core: a
   recursive `ClerkObject` response type that is both attribute-accessible and a
   `Mapping`, and a `ClerkTransport` built on httpx that honours `timeout_ms`.

@@ -120,9 +120,9 @@ def _check_wheel(version: str) -> None:
             "Classifier: Framework :: Django :: 4.2",
             "Classifier: Framework :: Django :: 5.2",
             "Classifier: Framework :: Django :: 6.0",
-            "Requires-Dist: clerk-backend-api>=6.0.1",
-            # Deliberately unbounded so new cryptography releases are usable
-            # as soon as clerk-backend-api stops capping them.
+            # Deliberately unbounded, and now actually unbounded in practice:
+            # clerk-backend-api moved to the [sdk] extra, so nothing in a base
+            # install caps cryptography.
             "Requires-Dist: cryptography>=45",
             # pyproject-fmt normalizes the upper bound to "<7"; it is the same
             # exclusion as "<7.0" under PEP 440.
@@ -136,6 +136,11 @@ def _check_wheel(version: str) -> None:
             "Requires-Dist: svix>=1",
             "Provides-Extra: drf",
             "Requires-Dist: djangorestframework>=3.14; extra == 'drf'",
+            # The SDK must be reachable only through the extra. If it ever
+            # reappears as an unconditional Requires-Dist, the cryptography
+            # ceiling comes back with it.
+            "Provides-Extra: sdk",
+            "Requires-Dist: clerk-backend-api>=6.0.1; extra == 'sdk'",
         }
         missing_metadata = sorted(
             item for item in expected_metadata if item not in metadata
@@ -143,6 +148,23 @@ def _check_wheel(version: str) -> None:
         if missing_metadata:
             joined = "\n  - ".join(missing_metadata)
             raise AssertionError(f"{wheel.name} metadata is missing:\n  - {joined}")
+
+        # The allowlist above only catches missing entries. A base install must
+        # additionally NOT require the SDK: an unconditional Requires-Dist on
+        # clerk-backend-api would restore its cryptography<49 ceiling for every
+        # user, which is precisely what moving it to an extra was meant to end.
+        unconditional_sdk = [
+            line
+            for line in metadata.splitlines()
+            if line.startswith("Requires-Dist: clerk-backend-api")
+            and "extra ==" not in line
+        ]
+        if unconditional_sdk:
+            joined = "\n  - ".join(unconditional_sdk)
+            raise AssertionError(
+                f"{wheel.name} requires clerk-backend-api unconditionally, which "
+                f"reintroduces its cryptography ceiling:\n  - {joined}"
+            )
 
         test_entries = sorted(entry for entry in entries if entry.startswith("tests/"))
         if test_entries:

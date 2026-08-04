@@ -1,0 +1,54 @@
+django-clerk-users
+Copyright (c) 2025 Justin Mitchel
+
+This product includes software ported from clerk-backend-api, the official
+Clerk Backend API SDK for Python.
+
+    Upstream project: clerk-backend-api
+    Upstream version: 6.0.1
+    Source:           https://github.com/clerk/clerk-sdk-python
+    License:          MIT
+
+Ported logic
+------------
+
+When session token verification moved off the SDK so that default installs are
+not held to the SDK's `cryptography` upper bound, the following logic was
+ported rather than reimplemented, so that verification semantics stay identical
+to the SDK's:
+
+  * `src/django_clerk_users/clerk_api/tokens.py`
+
+    - `compute_org_permissions` is a direct port of `_compute_org_permissions`
+      from `clerk_backend_api/security/authenticaterequest.py`, including its
+      feature/permission bitmask expansion.
+    - `enrich_v2_org_claims` is a port of `_process_payload` from the same
+      module, which synthesises flat v1-style org claims from a v2 token's
+      nested `o` claim.
+    - The RS256 verification flow, JWKS-by-`kid` caching with a 5 minute TTL,
+      the single bounded key-rotation retry, and the `azp` authorized-parties
+      check follow `clerk_backend_api/security/verifytoken.py` and
+      `clerk_backend_api/security/cache.py`.
+
+MIT License (clerk-backend-api)
+-------------------------------
+
+Copyright (c) 2024 Clerk
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

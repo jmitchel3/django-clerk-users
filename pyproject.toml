@@ -26,7 +26,9 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-  "clerk-backend-api>=6.0.1",
+  # clerk-backend-api is deliberately NOT here. It pins cryptography<49, and
+  # that pin is what resolvers obey, so a default install would be held to
+  # cryptography 48.x. It lives in the [sdk] extra instead.
   "cryptography>=45",
   "django>=4.2,<7",
   # Direct dependency rather than relying on the svix transitive: the thin
@@ -40,6 +42,11 @@ dependencies = [
 ]
 
 optional-dependencies.drf = [ "djangorestframework>=3.14" ]
+# Opt in with: pip install django-clerk-users[sdk]
+# Installing this reintroduces the cryptography<49 ceiling that
+# clerk-backend-api pins. It is also not sufficient on its own: the SDK backend
+# must be selected explicitly with CLERK_CLIENT_BACKEND = "sdk".
+optional-dependencies.sdk = [ "clerk-backend-api>=6.0.1" ]
 urls.Changelog = "https://github.com/jmitchel3/django-clerk-users/blob/main/CHANGELOG.md"
 urls.Documentation = "https://github.com/jmitchel3/django-clerk-users"
 urls.Issues = "https://github.com/jmitchel3/django-clerk-users/issues"
@@ -47,6 +54,9 @@ urls.Repository = "https://github.com/jmitchel3/django-clerk-users"
 
 [dependency-groups]
 dev = [
+  # Kept in dev so the suite can exercise the [sdk] backend even though the
+  # SDK is no longer a runtime dependency.
+  "clerk-backend-api>=6.0.1",
   "packaging>=24",
   "pip>=25.3",
   "pre-commit>=4.4",
@@ -68,6 +78,7 @@ include = [
   "/.env.example",
   "/CHANGELOG.md",
   "/LICENSE",
+  "/NOTICE",
   "/README.md",
   "/pyproject.toml",
   "/scripts",
@@ -124,6 +135,7 @@ env_list =
     py314-django42
     py314-django52
     py314-django60
+    py313-sdk
     py313-cryptolatest
 
 [testenv]
@@ -138,6 +150,7 @@ deps =
     pytest-django>=4.9
 extras =
     drf: drf
+    sdk: sdk
 set_env =
     !drf: DJANGO_CLERK_USERS_REQUIRE_WHEEL_IMPORT = 1
 allowlist_externals =

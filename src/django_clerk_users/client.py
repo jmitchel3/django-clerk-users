@@ -1,18 +1,17 @@
 """
-Clerk SDK client singleton.
+Clerk API client singleton.
+
+Which implementation is returned depends on ``CLERK_CLIENT_BACKEND``; see
+:func:`get_clerk_client`.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING
 
 from django.conf import settings
 
 from django_clerk_users.exceptions import ClerkConfigurationError
-
-if TYPE_CHECKING:
-    from clerk_backend_api import Clerk
 
 CLERK_NO_KEY_SENTINELS = {
     "abc123",
@@ -51,30 +50,36 @@ def _get_configured_secret_key() -> str | None:
     return get_configured_clerk_secret_key()
 
 
-@lru_cache(maxsize=1)
-def get_clerk_client() -> Clerk:
+CLERK_CLIENT_BACKEND_THIN = "thin"
+CLERK_CLIENT_BACKEND_SDK = "sdk"
+CLERK_CLIENT_BACKENDS = (CLERK_CLIENT_BACKEND_THIN, CLERK_CLIENT_BACKEND_SDK)
+DEFAULT_CLERK_CLIENT_BACKEND = CLERK_CLIENT_BACKEND_THIN
+
+
+def get_clerk_client_backend() -> str:
+    """Return the configured client backend, defaulting to the thin client.
+
+    Selection is by explicit setting only, never by what happens to be
+    importable. ``get_clerk_client`` is public API, and switching
+    implementations based on installed packages would make response models,
+    error types, retries, and available methods depend on the environment. It
+    would also silently reinstate the ``cryptography`` ceiling for anyone who
+    picked up ``clerk-backend-api`` as a transitive dependency.
     """
-    Get the Clerk SDK client instance.
+    backend = getattr(settings, "CLERK_CLIENT_BACKEND", DEFAULT_CLERK_CLIENT_BACKEND)
+    if isinstance(backend, bytes):
+        backend = backend.decode("utf-8", "replace")
+    backend = str(backend or DEFAULT_CLERK_CLIENT_BACKEND).strip().lower()
 
-    Returns a cached singleton instance of the Clerk client.
-
-    The SDK is imported here rather than at module scope so that importing this
-    package does not require ``clerk-backend-api``. Session token verification
-    no longer goes through the SDK, so auth-only deployments never reach this
-    function.
-
-    Raises:
-        ClerkConfigurationError: If CLERK_SECRET_KEY is not set or the SDK is
-            not installed.
-    """
-    try:
-        from clerk_backend_api import Clerk as ClerkSDK
-    except ImportError as exc:
+    if backend not in CLERK_CLIENT_BACKENDS:
         raise ClerkConfigurationError(
-            "clerk-backend-api is required for Clerk server API calls. "
-            "Install it with: pip install django-clerk-users[server]"
-        ) from exc
+            f"CLERK_CLIENT_BACKEND must be one of "
+            f"{', '.join(sorted(CLERK_CLIENT_BACKENDS))}; got {backend!r}."
+        )
+    return backend
 
+
+def _require_secret_key() -> str:
     # Read directly from Django settings to get the most current value.
     clerk_secret_key = _get_configured_secret_key()
     if not clerk_secret_key:
@@ -82,9 +87,48 @@ def get_clerk_client() -> Clerk:
             "CLERK_SECRET_KEY is not set to a real Clerk secret key. "
             "Please configure it in your Django settings."
         )
-    return ClerkSDK(bearer_auth=clerk_secret_key)
+    return clerk_secret_key
 
 
-def get_clerk_sdk() -> Clerk:
+@lru_cache(maxsize=1)
+def get_clerk_client():
+    """
+    Get the Clerk API client instance.
+
+    Returns a cached singleton. Which implementation you get is determined by
+    ``CLERK_CLIENT_BACKEND``:
+
+    - ``"thin"`` (default): this package's own REST client. No
+      ``clerk-backend-api`` install required, and no ``cryptography`` ceiling.
+    - ``"sdk"``: the official ``clerk-backend-api`` client. Requires
+      ``pip install django-clerk-users[sdk]``, and reintroduces that SDK's
+      ``cryptography<49`` pin.
+
+    Raises:
+        ClerkConfigurationError: If CLERK_SECRET_KEY is not set, the backend
+            name is unrecognized, or the SDK backend is selected without
+            ``clerk-backend-api`` installed.
+    """
+    backend = get_clerk_client_backend()
+    clerk_secret_key = _require_secret_key()
+
+    if backend == CLERK_CLIENT_BACKEND_SDK:
+        try:
+            from clerk_backend_api import Clerk as ClerkSDK
+        except ImportError as exc:
+            raise ClerkConfigurationError(
+                'CLERK_CLIENT_BACKEND is "sdk" but clerk-backend-api is not '
+                "installed. Install it with: "
+                "pip install django-clerk-users[sdk], or remove the setting to "
+                "use the built-in thin client."
+            ) from exc
+        return ClerkSDK(bearer_auth=clerk_secret_key)
+
+    from django_clerk_users.clerk_api import ClerkClient
+
+    return ClerkClient(clerk_secret_key)
+
+
+def get_clerk_sdk():
     """Alias for get_clerk_client() for compatibility."""
     return get_clerk_client()

@@ -5,6 +5,7 @@ Tests for django_clerk_users.server_api helpers.
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
+import pytest
 from django.test import override_settings
 
 from django_clerk_users import server_api
@@ -153,8 +154,14 @@ def test_create_clerk_user_returns_no_key_for_trimmed_placeholder():
     assert server_api.create_clerk_user("ada@example.com") == {"no_key": True}
 
 
-@override_settings(CLERK_SECRET_KEY="  sk_test_unit_server_secret  ")
+@override_settings(
+    CLERK_SECRET_KEY="  sk_test_unit_server_secret  ",
+    # The SDK backend is opt-in; the thin client is the default. Without this
+    # the helper would build a real ClerkClient and hit the network.
+    CLERK_CLIENT_BACKEND="sdk",
+)
 def test_create_clerk_user_trims_secret_before_creating_sdk_client():
+    pytest.importorskip("clerk_backend_api")
     from django_clerk_users.client import get_clerk_client
 
     client = make_client()
