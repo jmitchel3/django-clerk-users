@@ -96,6 +96,14 @@ class TestClerkTimeoutOptions:
 
         assert _clerk_timeout_options() == {"timeout_ms": 10000}
 
+    def test_nonpositive_timeout_falls_back_to_default(self, settings, caplog):
+        settings.CLERK_API_TIMEOUT_MS = 0
+
+        with caplog.at_level("WARNING"):
+            assert _clerk_timeout_options() == {"timeout_ms": 10000}
+
+        assert "Non-positive CLERK_API_TIMEOUT_MS" in caplog.text
+
 
 class TestClerkListData:
     """Test Clerk SDK list response normalization."""
@@ -113,6 +121,9 @@ class TestClerkListData:
 
     def test_none_response_is_empty(self):
         assert _clerk_list_data(None) == []
+
+    def test_none_data_attribute_is_empty(self):
+        assert _clerk_list_data(SimpleNamespace(data=None)) == []
 
 
 class TestUpdateOrCreateClerkUser:
@@ -178,6 +189,28 @@ class TestUpdateOrCreateClerkUser:
         assert user.email == "race@example.com"
         assert User.objects.filter(clerk_id="user_race").count() == 1
         assert get_clerk_user("user_race").pk == user.pk
+
+    def test_create_race_without_winner_is_reported(self, db, mock_clerk_client):
+        """A claimed race is re-raised when no winning row actually exists."""
+        from django_clerk_users import utils as utils_module
+
+        mock_clerk_client.users.get.return_value = make_mock_clerk_user(
+            "user_race_missing", email="race-missing@example.com"
+        )
+
+        with (
+            patch(
+                "django_clerk_users.utils.get_clerk_client",
+                return_value=mock_clerk_client,
+            ),
+            patch.object(
+                utils_module,
+                "_upsert_local_clerk_user",
+                side_effect=utils_module._ClerkIdCreateRace,
+            ),
+            pytest.raises(ClerkAPIError, match="Failed to fetch user from Clerk"),
+        ):
+            update_or_create_clerk_user("user_race_missing")
 
     def test_update_existing_user(self, clerk_user, mock_clerk_client):
         """Test updating an existing user from Clerk."""
@@ -450,6 +483,53 @@ class TestAbsorbClerkUserDuplicate:
 
         assert absorb_clerk_user_duplicate(target, email="claimed@example.com") is False
 
+    def test_target_cannot_be_its_own_duplicate(self, db):
+        User = get_user_model()
+        target = User.objects.create_user(
+            email="target@example.com", clerk_id="user_target"
+        )
+
+        assert absorb_clerk_user_duplicate(target, duplicate_user=target) is False
+
+    def test_explicit_duplicate_without_clerk_id_can_be_retained(self, db):
+        """No Clerk identity means neither row needs a Clerk-ID update."""
+        User = get_user_model()
+        target = User.objects.create_user(email="target@example.com", clerk_id=None)
+        duplicate = User.objects.create_user(
+            email="duplicate@example.com", clerk_id=None
+        )
+
+        absorbed = absorb_clerk_user_duplicate(
+            target,
+            duplicate_user=duplicate,
+            delete_duplicate=False,
+        )
+
+        target.refresh_from_db()
+        assert absorbed is True
+        assert target.clerk_id is None
+        assert User.objects.filter(pk=duplicate.pk).exists()
+
+    def test_email_duplicate_can_be_retained_while_identity_moves(self, db):
+        """The email lookup path clears a retained duplicate's Clerk identity."""
+        User = get_user_model()
+        target = User.objects.create_user(email="target@example.com", clerk_id=None)
+        duplicate = User.objects.create_user(
+            email="duplicate@example.com", clerk_id="user_duplicate_retained"
+        )
+
+        absorbed = absorb_clerk_user_duplicate(
+            target,
+            email="duplicate@example.com",
+            delete_duplicate=False,
+        )
+
+        target.refresh_from_db()
+        duplicate.refresh_from_db()
+        assert absorbed is True
+        assert target.clerk_id == "user_duplicate_retained"
+        assert duplicate.clerk_id is None
+
     def test_absorbs_fresh_duplicate_by_email(self, db):
         User = get_user_model()
         target = User.objects.create_user(
@@ -616,6 +696,11 @@ class TestGetClerkUser:
 
         cache_key = get_user_cache_key("user_util123")
         assert cache.get(cache_key) is not None
+
+    def test_legacy_negative_cache_sentinel_returns_none(self):
+        """Keep compatibility if a cache backend returns the raw False sentinel."""
+        with patch("django_clerk_users.utils.get_cached_user", return_value=False):
+            assert get_clerk_user("missing") is None
 
 
 class TestSyncUserFromClerk:

@@ -110,6 +110,7 @@ def test_webhook_view_falls_back_to_svix_id_for_deduplication():
     ):
         response = call_verified_webhook(
             {
+                "id": None,
                 "type": "user.created",
                 "data": {"id": "user_123"},
             },

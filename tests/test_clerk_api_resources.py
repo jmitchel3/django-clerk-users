@@ -222,6 +222,13 @@ class TestSessionResources:
         assert rec.last.method == "POST"
         assert rec.last.url.path == "/v1/sessions/sess_1/tokens"
 
+    def test_create_token_with_expiry(self):
+        client, rec = make_client([(200, {"jwt": "abc"})])
+
+        client.sessions.create_token(session_id="sess_1", expires_in_seconds="60")
+
+        assert rec.body() == {"expires_in_seconds": 60}
+
     def test_list_with_paging(self):
         client, rec = make_client([(200, {"data": []})])
 
@@ -450,6 +457,16 @@ class TestDropInCompatibilityWithRealCallSites:
 
 
 class TestPaginate:
+    def test_none_response_is_an_empty_page(self):
+        calls = []
+
+        def list_call(**kwargs):
+            calls.append(kwargs)
+            return None
+
+        assert list(paginate(list_call, page_size=100)) == []
+        assert calls == [{"limit": 100, "offset": 0}]
+
     def test_yields_every_item_across_pages(self):
         client, _ = make_client(
             [
@@ -500,3 +517,16 @@ class TestPaginate:
         items = list(paginate(client.users.list, page_size=100))
 
         assert len(items) == 1
+
+
+def test_client_forwards_explicit_base_url():
+    recorder = Recorder([(200, {"id": "user_1"})])
+    client = ClerkClient(
+        SECRET_KEY,
+        base_url="https://clerk.example.test/custom/",
+        transport=httpx.MockTransport(recorder),
+    )
+
+    client.users.get(user_id="user_1")
+
+    assert str(recorder.last.url) == "https://clerk.example.test/custom/users/user_1"

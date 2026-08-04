@@ -21,6 +21,11 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from django_clerk_users.clerk_api import ClerkTransport
 from django_clerk_users.clerk_api.tokens import (
     RequestState,
+    _fetch_jwks,
+    _JWKSCache,
+    _jwks_timeout_ms,
+    _reject_machine_tokens,
+    _unverified_kid,
     authenticate_session_token,
     clear_jwks_cache,
     compute_org_permissions,
@@ -245,6 +250,18 @@ class TestClaimValidation:
         with pytest.raises(ClerkTokenError, match="not active yet"):
             verify_session_token(token, jwt_key=PUBLIC_PEM)
 
+    def test_invalid_audience_is_rejected(self):
+        token = mint({"aud": "unexpected"})
+
+        with pytest.raises(ClerkTokenError, match="invalid audience"):
+            verify_session_token(token, jwt_key=PUBLIC_PEM, audience="expected")
+
+    def test_non_integer_iat_is_rejected(self):
+        token = mint({"iat": "tomorrow"})
+
+        with pytest.raises(ClerkTokenError, match="iat is in the future"):
+            verify_session_token(token, jwt_key=PUBLIC_PEM)
+
     def test_authorized_party_allowlist_accepts_a_match(self):
         payload = verify_session_token(
             mint(), jwt_key=PUBLIC_PEM, authorized_parties=[AZP]
@@ -390,6 +407,15 @@ class TestV2OrgClaimEnrichment:
 
         assert compute_org_permissions(claims) == []
 
+    def test_unset_permission_bit_is_skipped(self):
+        claims = {
+            "v": 2,
+            "fea": "o:billing",
+            "o": {"per": "read,manage", "fpm": "2"},
+        }
+
+        assert compute_org_permissions(claims) == ["org:billing:manage"]
+
     def test_malformed_feature_entry_is_skipped(self):
         claims = {"v": 2, "fea": "billing", "o": {"per": "read", "fpm": "1"}}
 
@@ -439,6 +465,55 @@ class TestRequestState:
 
         assert state.is_signed_in is False
         assert "expired" in state.reason
+
+    def test_empty_verified_payload_is_signed_out(self, monkeypatch):
+        import django_clerk_users.clerk_api.tokens as token_module
+
+        monkeypatch.setattr(token_module, "verify_session_token", lambda *a, **k: {})
+
+        state = token_module.authenticate_session_token("token")
+
+        assert state.is_signed_in is False
+        assert state.reason == "no payload"
+
+
+class TestTokenHelperEdgeCases:
+    def test_jwks_cache_handles_none_and_expired_entries(self):
+        cache = _JWKSCache()
+
+        cache.set(None, "ignored")
+        cache.mark_missing(None)
+        cache.delete(None)
+        assert cache.get(None) is None
+        assert cache.is_known_missing(None) is False
+
+        cache._entries["expired"] = ("pem", 0)
+        assert cache.get("expired") is None
+        assert "expired" not in cache._entries
+
+    def test_non_string_token_is_ignored_by_machine_prefix_check(self):
+        assert _reject_machine_tokens(object()) is None
+
+    def test_invalid_jwks_timeout_uses_strict_default(self):
+        from django_clerk_users.clerk_api.tokens import JWKS_FETCH_TIMEOUT_MS
+
+        assert _jwks_timeout_ms(object()) == JWKS_FETCH_TIMEOUT_MS
+
+    def test_malformed_token_header_is_wrapped(self):
+        with pytest.raises(ClerkTokenError, match="Token validation failed"):
+            _unverified_kid("not-a-jwt")
+
+    def test_empty_jwks_response_is_rejected(self):
+        class EmptyTransport:
+            def get(self, path, **kwargs):
+                return None
+
+        with pytest.raises(ClerkTokenError, match="JWKS response was empty"):
+            _fetch_jwks(
+                secret_key=SECRET_KEY,
+                transport=EmptyTransport(),
+                timeout_ms=250,
+            )
 
 
 class TestNoSDKImportRequired:
