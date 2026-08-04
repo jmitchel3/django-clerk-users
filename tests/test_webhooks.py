@@ -3,6 +3,7 @@ Tests for django-clerk-users webhooks.
 """
 
 from datetime import datetime, timezone as dt_timezone
+import builtins
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -91,6 +92,14 @@ class TestParseClerkTimestamp:
         """Test parsing invalid string returns None."""
         result = parse_clerk_timestamp("not-a-date")
         assert result is None
+
+    def test_parse_naive_iso_string_adds_utc(self):
+        result = parse_clerk_timestamp("2024-01-15T10:30:00")
+
+        assert result.tzinfo == dt_timezone.utc
+
+    def test_parse_unsupported_type_returns_none(self):
+        assert parse_clerk_timestamp(1.25) is None
 
 
 class TestDuplicateWebhook:
@@ -294,6 +303,36 @@ class TestProcessWebhookEvent:
 
         assert result is False
 
+    def test_process_session_handler_exception_is_failure(self):
+        with patch(
+            "django_clerk_users.webhooks.handlers.handle_session_created",
+            side_effect=RuntimeError("handler failed"),
+        ):
+            assert (
+                process_webhook_event("session.created", {"user_id": "user"}) is False
+            )
+
+    def test_process_organization_event_delegates_to_optional_app(self):
+        data = {"id": "org_123"}
+        with patch(
+            "django_clerk_users.organizations.webhooks.process_organization_event",
+            return_value=False,
+        ) as process_organization:
+            assert process_webhook_event("organization.updated", data) is False
+
+        process_organization.assert_called_once_with("organization.updated", data)
+
+    def test_process_organization_event_acknowledges_missing_optional_app(self):
+        original_import = builtins.__import__
+
+        def import_without_organizations(name, *args, **kwargs):
+            if name == "django_clerk_users.organizations.webhooks":
+                raise ImportError("organizations unavailable")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=import_without_organizations):
+            assert process_webhook_event("organization.created", {}) is True
+
 
 class TestHandleUserDeleted:
     """Test user deletion webhook handler."""
@@ -346,6 +385,15 @@ class TestHandleUserDeleted:
         user.refresh_from_db()
         assert result == user
         assert user.is_active is False
+
+    def test_delete_failure_returns_none(self, clerk_user):
+        from django_clerk_users.webhooks.handlers import handle_user_deleted
+
+        with patch(
+            "django_clerk_users.caching.invalidate_clerk_user_cache",
+            side_effect=RuntimeError("cache unavailable"),
+        ):
+            assert handle_user_deleted({"id": clerk_user.clerk_id}) is None
 
 
 class TestHandleUserCreatedWithUsername:
@@ -434,6 +482,20 @@ class TestHandleUserCreatedWithUsername:
         assert result.email is None
         assert result.username is None
 
+    def test_user_created_requires_id(self, db):
+        from django_clerk_users.webhooks.handlers import handle_user_created
+
+        assert handle_user_created({}) is None
+
+    def test_user_created_sync_failure_returns_none(self, db):
+        from django_clerk_users.webhooks.handlers import handle_user_created
+
+        with patch(
+            "django_clerk_users.utils.update_or_create_clerk_user",
+            side_effect=RuntimeError("sync failed"),
+        ):
+            assert handle_user_created({"id": "user_failed_create"}) is None
+
 
 class TestHandleUserUpdatedWithUsername:
     """Test user update webhook handler with username support."""
@@ -505,6 +567,20 @@ class TestHandleUserUpdatedWithUsername:
         assert result.email is None
         assert result.username == "nowusername"
 
+    def test_user_updated_requires_id(self, db):
+        from django_clerk_users.webhooks.handlers import handle_user_updated
+
+        assert handle_user_updated({}) is None
+
+    def test_user_updated_sync_failure_returns_none(self, db):
+        from django_clerk_users.webhooks.handlers import handle_user_updated
+
+        with patch(
+            "django_clerk_users.caching.invalidate_clerk_user_cache",
+            side_effect=RuntimeError("cache failed"),
+        ):
+            assert handle_user_updated({"id": "user_failed_update"}) is None
+
 
 class TestHandleSessionCreated:
     """Test session creation webhook handler."""
@@ -530,6 +606,20 @@ class TestHandleSessionCreated:
         data = {"created_at": 1704067200000}
         # Should not raise, just log
         handle_session_created(data)
+
+    def test_nonexistent_user_is_acknowledged(self, db):
+        from django_clerk_users.webhooks.handlers import handle_session_created
+
+        assert handle_session_created({"user_id": "user_missing"}) is True
+
+    def test_session_created_failure_returns_false(self, db):
+        from django_clerk_users.webhooks.handlers import handle_session_created
+
+        User = get_user_model()
+        with patch.object(
+            User.objects, "filter", side_effect=RuntimeError("database unavailable")
+        ):
+            assert handle_session_created({"user_id": "user_failed"}) is False
 
 
 class TestHandleSessionEnded:
@@ -560,6 +650,25 @@ class TestHandleSessionEnded:
 
         clerk_user.refresh_from_db()
         assert clerk_user.last_logout is not None
+
+    def test_missing_user_id_returns_false(self, db):
+        from django_clerk_users.webhooks.handlers import handle_session_ended
+
+        assert handle_session_ended({}) is False
+
+    def test_nonexistent_user_is_acknowledged(self, db):
+        from django_clerk_users.webhooks.handlers import handle_session_ended
+
+        assert handle_session_ended({"user_id": "user_missing"}) is True
+
+    def test_session_ended_failure_returns_false(self, db):
+        from django_clerk_users.webhooks.handlers import handle_session_ended
+
+        User = get_user_model()
+        with patch.object(
+            User.objects, "filter", side_effect=RuntimeError("database unavailable")
+        ):
+            assert handle_session_ended({"user_id": "user_failed"}) is False
 
 
 class TestWebhookSecurity:
