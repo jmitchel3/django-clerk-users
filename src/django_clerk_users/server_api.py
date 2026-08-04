@@ -27,6 +27,8 @@ from django_clerk_users.exceptions import ClerkConfigurationError
 logger = logging.getLogger(__name__)
 
 CLERK_API_DEFAULT_TIMEOUT_MS = 10_000
+CLERK_SESSION_LIST_PAGE_SIZE = 100
+CLERK_SESSION_LIST_MAX_PAGES = 100
 DUPLICATE_IDENTIFIER_CODES = {
     "form_identifier_exists",
     "form_identifier_not_unique",
@@ -548,6 +550,49 @@ def provision_clerk_user_access_link(
     }
 
 
+def _list_active_clerk_session_ids(
+    client: Any,
+    clerk_user_id: str,
+    *,
+    timeout_ms: int | None = None,
+) -> list[str]:
+    """Collect active Clerk session IDs for a user across every result page.
+
+    Listing is completed before any revoke so the ``status="active"`` window
+    cannot shift underneath the offset cursor.
+    """
+    session_ids: list[str] = []
+    seen: set[str] = set()
+    offset = 0
+
+    for _ in range(CLERK_SESSION_LIST_MAX_PAGES):
+        response = client.sessions.list(
+            user_id=clerk_user_id,
+            status="active",
+            limit=CLERK_SESSION_LIST_PAGE_SIZE,
+            offset=offset,
+            **_timeout_options(timeout_ms),
+        )
+        page = _list_data(response)
+        for session in page:
+            session_id = _get_value(session, "id")
+            if not session_id or session_id in seen:
+                continue
+            seen.add(session_id)
+            session_ids.append(session_id)
+
+        if len(page) < CLERK_SESSION_LIST_PAGE_SIZE:
+            return session_ids
+        offset += CLERK_SESSION_LIST_PAGE_SIZE
+
+    logger.warning(
+        "Stopped listing Clerk sessions for %s after %s pages",
+        clerk_user_id,
+        CLERK_SESSION_LIST_MAX_PAGES,
+    )
+    return session_ids
+
+
 def revoke_clerk_user_sessions(
     clerk_user_id: str,
     *,
@@ -561,16 +606,13 @@ def revoke_clerk_user_sessions(
         return None
 
     try:
-        response = client.sessions.list(
-            user_id=clerk_user_id,
-            status="active",
-            **_timeout_options(timeout_ms),
+        session_ids = _list_active_clerk_session_ids(
+            client,
+            clerk_user_id,
+            timeout_ms=timeout_ms,
         )
         revoked = 0
-        for session in _list_data(response):
-            session_id = _get_value(session, "id")
-            if not session_id:
-                continue
+        for session_id in session_ids:
             client.sessions.revoke(
                 session_id=session_id,
                 **_timeout_options(timeout_ms),

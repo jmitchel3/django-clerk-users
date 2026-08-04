@@ -2,6 +2,15 @@
 
 All notable changes to `django-clerk-users` are documented here.
 
+## Unreleased
+
+- Fixed `revoke_clerk_user_sessions` silently leaving sessions active when a
+  user had more than one page of them. The listing call sent no `limit` or
+  `offset` and ran no pagination loop, so only the Clerk API's default first
+  page was ever revoked. Listing now walks every page before any revoke runs,
+  which also keeps the `status="active"` window from shifting under the offset
+  cursor mid-loop. The loop is bounded by `CLERK_SESSION_LIST_MAX_PAGES`.
+
 ## 0.3.4 - 2026-08-03
 
 - Declared `cryptography>=45` with no upper bound so the package tracks new
