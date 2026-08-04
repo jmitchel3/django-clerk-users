@@ -409,6 +409,8 @@ def test_revoke_clerk_user_sessions_revokes_active_sessions():
     client.sessions.list.assert_called_once_with(
         user_id="user_123",
         status="active",
+        limit=server_api.CLERK_SESSION_LIST_PAGE_SIZE,
+        offset=0,
         timeout_ms=250,
     )
     assert client.sessions.revoke.call_args_list == [
@@ -429,6 +431,111 @@ def test_revoke_clerk_user_sessions_accepts_paginated_data_response():
     assert result == 1
     client.sessions.revoke.assert_called_once_with(
         session_id="sess_1",
+        timeout_ms=10_000,
+    )
+
+
+def test_revoke_clerk_user_sessions_follows_every_page():
+    page_size = server_api.CLERK_SESSION_LIST_PAGE_SIZE
+    first_page = [{"id": f"sess_{index}"} for index in range(page_size)]
+    second_page = [{"id": "sess_last"}]
+
+    client = make_client()
+    client.sessions.list.side_effect = [
+        SimpleNamespace(data=first_page),
+        SimpleNamespace(data=second_page),
+    ]
+
+    result = server_api.revoke_clerk_user_sessions(
+        "user_123",
+        clerk_client=client,
+        timeout_ms=250,
+    )
+
+    assert result == page_size + 1
+    assert client.sessions.list.call_args_list == [
+        call(
+            user_id="user_123",
+            status="active",
+            limit=page_size,
+            offset=0,
+            timeout_ms=250,
+        ),
+        call(
+            user_id="user_123",
+            status="active",
+            limit=page_size,
+            offset=page_size,
+            timeout_ms=250,
+        ),
+    ]
+    assert client.sessions.revoke.call_args_list[-1] == call(
+        session_id="sess_last",
+        timeout_ms=250,
+    )
+
+
+def test_revoke_clerk_user_sessions_lists_all_pages_before_revoking():
+    """Revokes start only after listing finishes, so the active window is stable."""
+    page_size = server_api.CLERK_SESSION_LIST_PAGE_SIZE
+    client = make_client()
+    calls: list[str] = []
+    pages = iter(
+        [
+            SimpleNamespace(
+                data=[{"id": f"sess_{index}"} for index in range(page_size)]
+            ),
+            SimpleNamespace(data=[{"id": "sess_last"}]),
+        ]
+    )
+
+    def record_list(*args, **kwargs):
+        calls.append("list")
+        return next(pages)
+
+    def record_revoke(*args, **kwargs):
+        calls.append("revoke")
+
+    client.sessions.list.side_effect = record_list
+    client.sessions.revoke.side_effect = record_revoke
+
+    server_api.revoke_clerk_user_sessions("user_123", clerk_client=client)
+
+    assert calls[:2] == ["list", "list"]
+    assert set(calls[2:]) == {"revoke"}
+
+
+def test_revoke_clerk_user_sessions_stops_at_page_ceiling():
+    page_size = server_api.CLERK_SESSION_LIST_PAGE_SIZE
+    max_pages = server_api.CLERK_SESSION_LIST_MAX_PAGES
+    counter = iter(range(10_000_000))
+
+    client = make_client()
+    client.sessions.list.side_effect = lambda *args, **kwargs: SimpleNamespace(
+        data=[{"id": f"sess_{next(counter)}"} for _ in range(page_size)]
+    )
+
+    result = server_api.revoke_clerk_user_sessions("user_123", clerk_client=client)
+
+    assert client.sessions.list.call_count == max_pages
+    assert result == page_size * max_pages
+
+
+def test_revoke_clerk_user_sessions_skips_duplicate_ids_across_pages():
+    page_size = server_api.CLERK_SESSION_LIST_PAGE_SIZE
+    repeated = [{"id": "sess_dup"} for _ in range(page_size)]
+
+    client = make_client()
+    client.sessions.list.side_effect = [
+        SimpleNamespace(data=repeated),
+        SimpleNamespace(data=[{"id": "sess_dup"}]),
+    ]
+
+    result = server_api.revoke_clerk_user_sessions("user_123", clerk_client=client)
+
+    assert result == 1
+    client.sessions.revoke.assert_called_once_with(
+        session_id="sess_dup",
         timeout_ms=10_000,
     )
 
