@@ -17,6 +17,13 @@ Two verification modes:
 This module is bearer-token only. The SDK also reads a ``__session`` cookie,
 but accepting a cookie is a new authentication mechanism with CSRF
 implications, not compatibility work, so it is deliberately not ported.
+
+Attribution
+-----------
+The verification flow, the JWKS cache, the key-rotation retry, and the v2 org
+claim handling are ported from ``clerk-backend-api`` 6.0.1 (MIT, Copyright (c)
+2024 Clerk). See the ``NOTICE`` file at the repository root for the full
+attribution and license text.
 """
 
 from __future__ import annotations

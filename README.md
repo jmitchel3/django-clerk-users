@@ -27,6 +27,14 @@ For Django REST Framework support:
 pip install django-clerk-users[drf]
 ```
 
+To use the official `clerk-backend-api` SDK for server-side API calls instead
+of the built-in thin client (note that this reintroduces that SDK's
+`cryptography<49` pin):
+
+```bash
+pip install django-clerk-users[sdk]
+```
+
 Use `.env.example` as a starting point for required Clerk settings in each
 environment.
 
@@ -36,17 +44,49 @@ This package supports Python 3.12 through 3.14 and Django 4.2, 5.2, and 6.0.
 CI installs and tests the built wheel across those supported Django/Python
 combinations and exercises the optional Django REST Framework extra.
 
-`cryptography` is declared as `>=45` with **no upper bound**, so this package
-never holds you back from a newer release. Any ceiling you hit in practice
-comes from `clerk-backend-api`, which pins its own `cryptography` range. A
-scheduled workflow reports where that ceiling sits, and a `py313-cryptolatest`
-tox environment runs the test suite against the newest `cryptography`
-regardless of the ceiling:
+`cryptography` is declared as `>=45` with **no upper bound**, and a default
+install now has no ceiling in practice either. `clerk-backend-api` pins
+`cryptography<49`, and that pin is what resolvers obey, so it lives in the
+optional `[sdk]` extra rather than the base dependencies:
+
+```bash
+pip install django-clerk-users          # cryptography 50.x
+pip install django-clerk-users[sdk]     # held to cryptography 48.x
+```
+
+A scheduled workflow reports where the upstream ceiling sits, and a
+`py313-cryptolatest` tox environment runs the suite against the newest
+`cryptography`:
 
 ```bash
 uv run python scripts/check_cryptography_ceiling.py
 uv run tox -e py313-cryptolatest
 ```
+
+### Clerk API client backends
+
+Server-side Clerk API calls go through a client selected by
+`CLERK_CLIENT_BACKEND`:
+
+| Value | Client | Requires | `cryptography` |
+|---|---|---|---|
+| `"thin"` *(default)* | Built-in REST client | nothing extra | unbounded |
+| `"sdk"` | Official `clerk-backend-api` | `[sdk]` extra | capped at `<49` |
+
+```python
+# settings.py — only needed to opt into the official SDK
+CLERK_CLIENT_BACKEND = "sdk"
+```
+
+Selection is **by setting only, never by what happens to be installed**.
+`get_clerk_client()` is public API, so picking an implementation based on
+importability would make response models, error types, retries, and available
+methods depend on the environment, and would silently restore the
+`cryptography` ceiling for anyone who acquired `clerk-backend-api` as a
+transitive dependency. Setting `CLERK_CLIENT_BACKEND = "sdk"` without
+installing the extra raises `ClerkConfigurationError` rather than falling back.
+
+Session token verification never uses the SDK on either backend.
 
 ## Quick Start
 
@@ -489,9 +529,11 @@ For high-traffic apps, you may want to defer username generation to a background
 from django.dispatch import receiver
 from django_clerk_users.webhooks.signals import clerk_user_created
 
+
 @receiver(clerk_user_created)
 def handle_user_created(sender, user, clerk_data, **kwargs):
     from myapp.tasks import generate_username_task
+
     generate_username_task.delay(user.pk)
 ```
 
@@ -499,6 +541,7 @@ def handle_user_created(sender, user, clerk_data, **kwargs):
 # myapp/tasks.py (Celery example)
 from celery import shared_task
 from django_clerk_users.utils import generate_username_for_user
+
 
 @shared_task
 def generate_username_task(user_id: int):
@@ -561,6 +604,7 @@ CLERK_DISABLE_PASSWORD_SYNC = True
 | `CLERK_FRONTEND_HOSTS` | Yes | `[]` | Authorized frontend URLs |
 | `CLERK_AUTH_PARTIES` | No | `[]` | Alias for `CLERK_FRONTEND_HOSTS` |
 | `CLERK_JWT_KEY` | No | - | PEM public key for networkless token verification (skips the JWKS request) |
+| `CLERK_CLIENT_BACKEND` | No | `"thin"` | Clerk API client: `"thin"` (built-in) or `"sdk"` (requires the `[sdk]` extra) |
 | `CLERK_SESSION_REVALIDATION_SECONDS` | No | `300` | JWT revalidation interval (seconds) |
 | `CLERK_CACHE_TIMEOUT` | No | `300` | User cache timeout (seconds) |
 | `CLERK_ORG_CACHE_TIMEOUT` | No | `900` | Organization cache timeout (seconds) |

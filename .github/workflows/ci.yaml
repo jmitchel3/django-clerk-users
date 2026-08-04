@@ -129,6 +129,95 @@ jobs:
         include-hidden-files: true
         if-no-files-found: warn
 
+  install-shapes:
+    name: Install shape (${{ matrix.shape }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - shape: base
+          extras: ''
+        - shape: sdk
+          extras: '[sdk]'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+
+    - name: Build wheel
+      timeout-minutes: 5
+      run: uv build
+
+    - name: Install the wheel with ${{ matrix.shape }} extras
+      timeout-minutes: 5
+      run: |
+        uv venv .shape-venv
+        uv pip install --python .shape-venv \
+          "$(echo dist/django_clerk_users-*.whl)${{ matrix.extras }}"
+        uv pip install --python .shape-venv pytest pytest-django
+
+    - name: Assert clerk-backend-api presence matches the install shape
+      timeout-minutes: 5
+      env:
+        SHAPE: ${{ matrix.shape }}
+      run: |
+        .shape-venv/bin/python - <<'PY'
+        import os, importlib.util, sys
+        shape = os.environ["SHAPE"]
+        installed = importlib.util.find_spec("clerk_backend_api") is not None
+        if shape == "base" and installed:
+            sys.exit("clerk-backend-api leaked into a base install")
+        if shape == "sdk" and not installed:
+            sys.exit("clerk-backend-api missing from an [sdk] install")
+        print(f"{shape}: clerk-backend-api installed={installed}")
+        PY
+
+    - name: Run the suite against the installed wheel
+      timeout-minutes: 10
+      env:
+        DJANGO_SETTINGS_MODULE: tests.settings
+      run: .shape-venv/bin/python -m pytest -o pythonpath= -q
+
+  cryptolatest-base:
+    name: Cryptolatest on a base install
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+
+    - name: Install dependencies
+      timeout-minutes: 5
+      run: uv sync --group dev --frozen
+
+    # The point of moving clerk-backend-api to an extra: with no SDK in the
+    # base install, nothing caps cryptography, so the newest release installs.
+    - name: Run cryptolatest against a base install
+      timeout-minutes: 10
+      run: uv run tox -e py313-cryptolatest
+
   coverage:
     name: Coverage
     runs-on: ubuntu-24.04

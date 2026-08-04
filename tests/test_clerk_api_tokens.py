@@ -499,11 +499,20 @@ class TestNoSDKImportRequired:
         payload = tokens.verify_session_token(mint(), jwt_key=PUBLIC_PEM)
         assert payload["sub"] == "user_123"
 
-        # The SDK path is still reachable, and now fails with a clear
-        # configuration error rather than an ImportError at import time.
+        # Explicitly selecting the SDK backend without the SDK installed fails
+        # with an actionable configuration error, not an ImportError at import
+        # time. The default (thin) backend never reaches that code path.
+        from django.test import override_settings
+
         from django_clerk_users.exceptions import ClerkConfigurationError
 
         client.get_clerk_client.cache_clear()
-        with pytest.raises(ClerkConfigurationError, match="clerk-backend-api"):
-            client.get_clerk_client()
-        client.get_clerk_client.cache_clear()
+        try:
+            with override_settings(
+                CLERK_SECRET_KEY="sk_test_unit_backend_secret",
+                CLERK_CLIENT_BACKEND="sdk",
+            ):
+                with pytest.raises(ClerkConfigurationError, match="clerk-backend-api"):
+                    client.get_clerk_client()
+        finally:
+            client.get_clerk_client.cache_clear()
