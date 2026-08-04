@@ -4,6 +4,35 @@ All notable changes to `django-clerk-users` are documented here.
 
 ## Unreleased
 
+### Security and hardening
+
+Each of these is a behavior change relative to the Clerk SDK's verification
+semantics, not a refactor.
+
+- **v2 org claims can no longer be forged.** On a v2 token the flat `org_id`,
+  `org_slug`, `org_role`, and `org_permissions` fields are now always derived
+  from the nested `o` claim, and cleared when `o` is absent. Previously a v2
+  token carrying a custom flat `org_id` and no active organization kept that
+  value, and `request.org` is what org-scoped tenancy keys off. v1 tokens,
+  which legitimately carry flat claims, are unaffected.
+- **Machine tokens are rejected before any network call.** Tokens beginning
+  `ak_`, `oat_`, `m2m_`, or `mt_` are API keys, OAuth access tokens, or
+  machine-to-machine tokens. They are verified through Clerk's API rather than
+  as RS256 JWTs, so they could never authenticate a session; they now fail
+  immediately instead of costing a JWKS request first.
+- **`sub`, `sid`, and `exp` are now required.** PyJWT validates only the claims
+  a token actually contains, so a token omitting `exp` was never checked for
+  expiry. Their absence is now a rejection.
+- **Unresolvable `kid` values are negative-cached** for 30 seconds, so traffic
+  bearing an unknown `kid` can no longer amplify into one outbound JWKS request
+  per inbound request. The window is short so a newly rotated signing key
+  becomes usable quickly, and an explicit rotation eviction clears it.
+- **JWKS fetches are single-flighted and get a strict 3 second timeout.**
+  Concurrent misses for the same `kid` now share one request instead of issuing
+  one each, and this inline authentication-path call fails fast rather than
+  inheriting the longer general Clerk API timeout. A shorter caller-supplied
+  timeout still wins.
+
 ### Breaking
 
 - **`clerk-backend-api` moved to an optional `[sdk]` extra and is no longer
