@@ -16,7 +16,12 @@ import json
 import httpx
 import pytest
 
-from django_clerk_users.clerk_api import ClerkObject, ClerkTransport, clerk_value
+from django_clerk_users.clerk_api import (
+    ClerkObject,
+    ClerkTransport,
+    clerk_value,
+    to_plain_data,
+)
 from django_clerk_users.exceptions import ClerkAPIError
 
 SECRET_KEY = "sk_test_thin_client"
@@ -49,6 +54,16 @@ USER_PAYLOAD = {
 
 
 class TestClerkObject:
+    def test_clerk_value_preserves_objects_and_scalars(self):
+        existing = ClerkObject({"id": "user_123"})
+
+        assert clerk_value(existing) is existing
+        assert clerk_value("plain") == "plain"
+        assert clerk_value(({"id": "user_123"}, "plain")) == [
+            existing,
+            "plain",
+        ]
+
     def test_attribute_access_reaches_nested_entries(self):
         user = clerk_value(USER_PAYLOAD)
 
@@ -90,6 +105,44 @@ class TestClerkObject:
 
         with pytest.raises(AttributeError):
             user.id = "user_other"
+
+        with pytest.raises(AttributeError):
+            del user.id
+
+    def test_dir_repr_and_iteration_reflect_underlying_data(self):
+        user = ClerkObject({"z": 1, "a": 2})
+
+        assert list(user) == ["z", "a"]
+        assert "z" in dir(user)
+        assert repr(user) == "ClerkObject({'z': 1, 'a': 2})"
+
+    def test_model_dump_can_recursively_exclude_none(self):
+        value = ClerkObject(
+            {
+                "keep": 1,
+                "drop": None,
+                "nested": {"keep": 2, "drop": None},
+                "items": [{"keep": 3, "drop": None}, None, "scalar"],
+            }
+        )
+
+        assert value.model_dump() == {
+            "keep": 1,
+            "drop": None,
+            "nested": {"keep": 2, "drop": None},
+            "items": [{"keep": 3, "drop": None}, None, "scalar"],
+        }
+        assert value.model_dump(exclude_none=True) == {
+            "keep": 1,
+            "nested": {"keep": 2},
+            "items": [{"keep": 3}, None, "scalar"],
+        }
+
+    def test_plain_data_recurses_through_tuples_and_scalars(self):
+        assert to_plain_data((ClerkObject({"id": 1}), "scalar")) == [
+            {"id": 1},
+            "scalar",
+        ]
 
     def test_empty_object_is_falsey_and_has_no_keys(self):
         empty = ClerkObject()
@@ -160,6 +213,17 @@ class TestRealCallSitesAgainstDecodedResponses:
 
 
 class TestErrorType:
+    def test_existing_clerk_objects_are_normalized_only_when_needed(self):
+        with_errors = ClerkObject({"errors": [{"code": "bad"}]})
+        without_errors = ClerkObject({"detail": "bad"})
+
+        preserved = ClerkAPIError("boom", data=with_errors)
+        normalized = ClerkAPIError("boom", data=without_errors)
+
+        assert preserved.data is with_errors
+        assert normalized.data.detail == "bad"
+        assert normalized.errors == []
+
     def test_duplicate_identifier_detection_still_works(self):
         """server_api duplicate detection must work without SDK types."""
         from django_clerk_users import server_api

@@ -16,6 +16,7 @@ from django.test import override_settings
 
 from django_clerk_users.client import (
     DEFAULT_CLERK_CLIENT_BACKEND,
+    _normalize_secret_key,
     get_clerk_client,
     get_clerk_client_backend,
 )
@@ -53,6 +54,26 @@ class TestBackendResolution:
         with override_settings(CLERK_CLIENT_BACKEND=""):
             assert get_clerk_client_backend() == "thin"
 
+    def test_bytes_backend_is_decoded(self):
+        with override_settings(CLERK_CLIENT_BACKEND=b" SDK "):
+            assert get_clerk_client_backend() == "sdk"
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (None, None),
+            (b"sk_test_valid", "sk_test_valid"),
+            (b"\xff", None),
+            (object(), None),
+            ("", None),
+            ("not_a_secret", None),
+            ("sk_test_mock_secret_key", None),
+            (" sk_test_valid ", "sk_test_valid"),
+        ],
+    )
+    def test_secret_key_normalization(self, value, expected):
+        assert _normalize_secret_key(value) == expected
+
 
 class TestClientConstruction:
     def test_default_returns_the_thin_client(self):
@@ -82,6 +103,22 @@ class TestClientConstruction:
 
         with override_settings(CLERK_SECRET_KEY=SECRET, CLERK_CLIENT_BACKEND="sdk"):
             assert isinstance(get_clerk_client(), clerk_backend_api.Clerk)
+
+    def test_sdk_backend_reports_a_missing_optional_dependency(self, monkeypatch):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def without_sdk(name, *args, **kwargs):
+            if name == "clerk_backend_api":
+                raise ImportError("SDK unavailable")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", without_sdk)
+
+        with override_settings(CLERK_SECRET_KEY=SECRET, CLERK_CLIENT_BACKEND="sdk"):
+            with pytest.raises(ClerkConfigurationError, match="not installed"):
+                get_clerk_client()
 
     def test_installed_sdk_does_not_change_the_default(self):
         """The property the request is really about.
