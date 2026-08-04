@@ -9,14 +9,15 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from clerk_backend_api.security.types import AuthenticateRequestOptions
 from django.conf import settings
 from django.core.cache import cache
 
-from django_clerk_users.client import get_clerk_client
+from django_clerk_users.client import (
+    get_configured_clerk_secret_key,
+)
+from django_clerk_users.clerk_api.tokens import authenticate_session_token
 from django_clerk_users.exceptions import (
     ClerkAuthenticationError,
-    ClerkConfigurationError,
     ClerkTokenError,
 )
 
@@ -84,6 +85,20 @@ def _get_auth_parties() -> list[str]:
         getattr(settings, "CLERK_FRONTEND_HOSTS", []),
     )
     return _coerce_string_list(raw_auth_parties, "CLERK_AUTH_PARTIES")
+
+
+def _get_jwt_key() -> str | None:
+    """Return the configured static PEM key for networkless verification."""
+    jwt_key = getattr(settings, "CLERK_JWT_KEY", None)
+    if isinstance(jwt_key, bytes):
+        try:
+            jwt_key = jwt_key.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    if not isinstance(jwt_key, str):
+        return None
+    jwt_key = jwt_key.strip()
+    return jwt_key or None
 
 
 def _get_cache_timeout() -> int:
@@ -169,33 +184,29 @@ def get_clerk_payload_from_request(request: HttpRequest) -> dict[str, Any] | Non
     if cached_payload is not None:
         return cached_payload
 
-    try:
-        clerk = get_clerk_client()
-    except ClerkConfigurationError:
+    secret_key = get_configured_clerk_secret_key()
+    jwt_key = _get_jwt_key()
+    if not secret_key and not jwt_key:
         # Clerk is not configured, skip authentication silently
         return None
 
     try:
-        # Build auth options with authorized parties.
-        #
-        # The options object is always constructed: the SDK reads
-        # ``options.secret_key`` unconditionally, so passing ``None`` raises an
-        # AttributeError that the broad ``except`` below would report as a
-        # generic token failure.
-        #
-        # An empty allowlist must be normalized to ``None`` rather than passed
-        # through as ``[]``. The SDK skips the ``azp`` check only when
-        # ``authorized_parties is None``; an empty list is treated as an
-        # allowlist that matches nothing and rejects every token.
-        auth_options = AuthenticateRequestOptions(
-            authorized_parties=_get_auth_parties() or None
+        # An empty allowlist must be passed as None, not []. The azp check runs
+        # only when authorized_parties is not None, and an empty list would be
+        # an allowlist that matches nothing, rejecting every token.
+        request_state = authenticate_session_token(
+            token,
+            secret_key=secret_key,
+            jwt_key=jwt_key,
+            authorized_parties=_get_auth_parties() or None,
         )
 
-        # Validate the token using Clerk SDK
-        request_state = clerk.authenticate_request(request, options=auth_options)
-
         if not request_state.is_signed_in:
-            reason = getattr(request_state, "message", None) or "not signed in"
+            reason = (
+                getattr(request_state, "reason", None)
+                or getattr(request_state, "message", None)
+                or "not signed in"
+            )
             logger.debug("Clerk token validation failed: %s", reason)
             raise ClerkTokenError(f"Token validation failed: {reason}")
 

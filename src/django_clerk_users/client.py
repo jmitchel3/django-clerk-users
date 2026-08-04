@@ -2,12 +2,17 @@
 Clerk SDK client singleton.
 """
 
-from functools import lru_cache
+from __future__ import annotations
 
-from clerk_backend_api import Clerk
+from functools import lru_cache
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 
 from django_clerk_users.exceptions import ClerkConfigurationError
+
+if TYPE_CHECKING:
+    from clerk_backend_api import Clerk
 
 CLERK_NO_KEY_SENTINELS = {
     "abc123",
@@ -53,9 +58,23 @@ def get_clerk_client() -> Clerk:
 
     Returns a cached singleton instance of the Clerk client.
 
+    The SDK is imported here rather than at module scope so that importing this
+    package does not require ``clerk-backend-api``. Session token verification
+    no longer goes through the SDK, so auth-only deployments never reach this
+    function.
+
     Raises:
-        ClerkConfigurationError: If CLERK_SECRET_KEY is not set.
+        ClerkConfigurationError: If CLERK_SECRET_KEY is not set or the SDK is
+            not installed.
     """
+    try:
+        from clerk_backend_api import Clerk as ClerkSDK
+    except ImportError as exc:
+        raise ClerkConfigurationError(
+            "clerk-backend-api is required for Clerk server API calls. "
+            "Install it with: pip install django-clerk-users[server]"
+        ) from exc
+
     # Read directly from Django settings to get the most current value.
     clerk_secret_key = _get_configured_secret_key()
     if not clerk_secret_key:
@@ -63,7 +82,7 @@ def get_clerk_client() -> Clerk:
             "CLERK_SECRET_KEY is not set to a real Clerk secret key. "
             "Please configure it in your Django settings."
         )
-    return Clerk(bearer_auth=clerk_secret_key)
+    return ClerkSDK(bearer_auth=clerk_secret_key)
 
 
 def get_clerk_sdk() -> Clerk:

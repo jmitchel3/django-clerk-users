@@ -4,7 +4,7 @@ Tests for django-clerk-users authentication backend.
 
 import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -182,26 +182,29 @@ class TestClerkPayloadFromRequest:
 
         assert _get_auth_parties() == ["https://app.example.com"]
 
-    def test_near_expiring_payload_is_not_cached(self):
+    def test_near_expiring_payload_is_not_cached(self, settings):
         """Test that payloads near expiry are returned but not cached."""
         from django_clerk_users.authentication.utils import (
             get_clerk_payload_from_request,
         )
 
         cache.clear()
+        # The default test secret is a documented placeholder that reads as
+        # "unconfigured", which short-circuits verification before it starts.
+        settings.CLERK_SECRET_KEY = "sk_test_unit_auth_secret"
         request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer token_soon")
         now = int(time.time())
         payload = {"sub": "user_auth123", "exp": now + 30}
-        clerk = MagicMock()
-        clerk.authenticate_request.return_value = SimpleNamespace(
+        request_state = SimpleNamespace(
             is_signed_in=True,
             payload=payload,
+            reason=None,
         )
 
         with (
             patch(
-                "django_clerk_users.authentication.utils.get_clerk_client",
-                return_value=clerk,
+                "django_clerk_users.authentication.utils.authenticate_session_token",
+                return_value=request_state,
             ),
             patch("django_clerk_users.authentication.utils.cache.set") as cache_set,
         ):
@@ -217,20 +220,21 @@ class TestClerkPayloadFromRequest:
         )
 
         cache.clear()
+        settings.CLERK_SECRET_KEY = "sk_test_unit_auth_secret"
         settings.CLERK_CACHE_TIMEOUT = 300
         request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer token_later")
         now = int(time.time())
         payload = {"sub": "user_auth123", "exp": now + 120}
-        clerk = MagicMock()
-        clerk.authenticate_request.return_value = SimpleNamespace(
+        request_state = SimpleNamespace(
             is_signed_in=True,
             payload=payload,
+            reason=None,
         )
 
         with (
             patch(
-                "django_clerk_users.authentication.utils.get_clerk_client",
-                return_value=clerk,
+                "django_clerk_users.authentication.utils.authenticate_session_token",
+                return_value=request_state,
             ),
             patch("django_clerk_users.authentication.utils.cache.set") as cache_set,
         ):
@@ -247,19 +251,20 @@ class TestClerkPayloadFromRequest:
         )
 
         cache.clear()
+        settings.CLERK_SECRET_KEY = "sk_test_unit_auth_secret"
         settings.CLERK_CACHE_TIMEOUT = "not-an-int"
         request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer token_later")
         payload = {"sub": "user_auth123"}
-        clerk = MagicMock()
-        clerk.authenticate_request.return_value = SimpleNamespace(
+        request_state = SimpleNamespace(
             is_signed_in=True,
             payload=payload,
+            reason=None,
         )
 
         with (
             patch(
-                "django_clerk_users.authentication.utils.get_clerk_client",
-                return_value=clerk,
+                "django_clerk_users.authentication.utils.authenticate_session_token",
+                return_value=request_state,
             ),
             patch("django_clerk_users.authentication.utils.cache.set") as cache_set,
         ):
@@ -269,105 +274,75 @@ class TestClerkPayloadFromRequest:
         cache_set.assert_called_once()
         assert cache_set.call_args.kwargs["timeout"] == 300
 
-    def test_options_are_built_when_no_authorized_parties_configured(self, settings):
-        """Test verification still passes an options object with an empty allowlist.
+    def test_empty_allowlist_is_passed_as_none_not_empty_list(self, settings):
+        """Carried over from the AuthenticateRequestOptions fix.
 
-        The SDK reads ``options.secret_key`` unconditionally, so passing
-        ``options=None`` raises an AttributeError that surfaces as a generic
-        token failure.
+        The azp check runs only when authorized_parties is not None, so an
+        empty list would be an allowlist matching nothing and would reject
+        every token. The verification engine changed underneath this, but the
+        [] vs None distinction it guards did not.
         """
         from django_clerk_users.authentication.utils import (
             get_clerk_payload_from_request,
         )
 
         cache.clear()
+        settings.CLERK_SECRET_KEY = "sk_test_unit_auth_secret"
         settings.CLERK_FRONTEND_HOSTS = []
         settings.CLERK_AUTH_PARTIES = []
         request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer token_no_azp")
         payload = {"sub": "user_auth123"}
-        clerk = MagicMock()
-        clerk.authenticate_request.return_value = SimpleNamespace(
-            is_signed_in=True,
-            payload=payload,
-        )
+        request_state = SimpleNamespace(is_signed_in=True, payload=payload, reason=None)
 
         with patch(
-            "django_clerk_users.authentication.utils.get_clerk_client",
-            return_value=clerk,
-        ):
-            result = get_clerk_payload_from_request(request)
+            "django_clerk_users.authentication.utils.authenticate_session_token",
+            return_value=request_state,
+        ) as verify:
+            assert get_clerk_payload_from_request(request) == payload
 
-        assert result == payload
-        options = clerk.authenticate_request.call_args.kwargs["options"]
-        assert options is not None
-        # None, not [], so the SDK skips the azp check instead of treating it
-        # as an allowlist that matches nothing.
-        assert options.authorized_parties is None
+        assert verify.call_args.kwargs["authorized_parties"] is None
 
-    def test_configured_authorized_parties_reach_the_sdk(self, settings):
-        """Test a configured allowlist is forwarded to the SDK options."""
+    def test_configured_authorized_parties_reach_verification(self, settings):
+        """A configured allowlist is forwarded unchanged."""
         from django_clerk_users.authentication.utils import (
             get_clerk_payload_from_request,
         )
 
         cache.clear()
+        settings.CLERK_SECRET_KEY = "sk_test_unit_auth_secret"
         settings.CLERK_AUTH_PARTIES = ["https://app.example.com"]
         request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer token_with_azp")
         payload = {"sub": "user_auth123"}
-        clerk = MagicMock()
-        clerk.authenticate_request.return_value = SimpleNamespace(
-            is_signed_in=True,
-            payload=payload,
-        )
+        request_state = SimpleNamespace(is_signed_in=True, payload=payload, reason=None)
 
         with patch(
-            "django_clerk_users.authentication.utils.get_clerk_client",
-            return_value=clerk,
-        ):
-            result = get_clerk_payload_from_request(request)
+            "django_clerk_users.authentication.utils.authenticate_session_token",
+            return_value=request_state,
+        ) as verify:
+            assert get_clerk_payload_from_request(request) == payload
 
-        assert result == payload
-        options = clerk.authenticate_request.call_args.kwargs["options"]
-        assert options.authorized_parties == ["https://app.example.com"]
+        assert verify.call_args.kwargs["authorized_parties"] == [
+            "https://app.example.com"
+        ]
 
-    def test_empty_allowlist_does_not_reject_a_valid_token(self, settings):
-        """Test the empty-allowlist path against the real SDK verification rule.
-
-        Guards the ``[]`` vs ``None`` distinction: the SDK only skips the azp
-        check when ``authorized_parties is None``. Passing ``[]`` would reject
-        every token.
-        """
-        from clerk_backend_api.security.types import AuthenticateRequestOptions
-
-        from django_clerk_users.authentication.utils import _get_auth_parties
-
-        settings.CLERK_FRONTEND_HOSTS = []
-        settings.CLERK_AUTH_PARTIES = []
-
-        options = AuthenticateRequestOptions(
-            authorized_parties=_get_auth_parties() or None
-        )
-
-        assert options.authorized_parties is None
-
-    def test_unsigned_request_state_raises_for_present_bearer_token(self):
+    def test_unsigned_request_state_raises_for_present_bearer_token(self, settings):
         """Test that an invalid bearer token is not treated as anonymous."""
         from django_clerk_users.authentication.utils import (
             get_clerk_payload_from_request,
         )
 
         cache.clear()
+        settings.CLERK_SECRET_KEY = "sk_test_unit_auth_secret"
         request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer invalid_token")
-        clerk = MagicMock()
-        clerk.authenticate_request.return_value = SimpleNamespace(
+        request_state = SimpleNamespace(
             is_signed_in=False,
-            message="token expired",
+            reason="token expired",
             payload=None,
         )
 
         with patch(
-            "django_clerk_users.authentication.utils.get_clerk_client",
-            return_value=clerk,
+            "django_clerk_users.authentication.utils.authenticate_session_token",
+            return_value=request_state,
         ):
             with pytest.raises(ClerkTokenError, match="token expired"):
                 get_clerk_payload_from_request(request)

@@ -162,7 +162,10 @@ def test_create_clerk_user_trims_secret_before_creating_sdk_client():
     get_clerk_client.cache_clear()
 
     try:
-        with patch("django_clerk_users.client.Clerk", return_value=client) as Clerk:
+        # The SDK is imported lazily inside get_clerk_client so that importing
+        # this package does not require clerk-backend-api, so patch it at its
+        # source rather than on django_clerk_users.client.
+        with patch("clerk_backend_api.Clerk", return_value=client) as Clerk:
             result = server_api.create_clerk_user("ada@example.com")
     finally:
         get_clerk_client.cache_clear()

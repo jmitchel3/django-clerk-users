@@ -32,6 +32,10 @@ dependencies = [
   # Direct dependency rather than relying on the svix transitive: the thin
   # Clerk client imports httpx itself, and svix is due to be droppable.
   "httpx>=0.27",
+  # Session token verification uses PyJWT directly instead of going through
+  # clerk-backend-api. Same library the SDK uses, so verification semantics are
+  # unchanged; it just stops arriving as an SDK transitive.
+  "pyjwt>=2.8",
   "svix>=1",
 ]
 

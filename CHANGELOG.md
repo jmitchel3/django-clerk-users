@@ -17,6 +17,26 @@ All notable changes to `django-clerk-users` are documented here.
   object is now always constructed. An empty allowlist is normalized to `None`
   rather than `[]`, because the SDK skips the `azp` check only for `None` and
   would treat an empty list as an allowlist matching nothing.
+- **Fixed `request.org` being `None` for every v2 session token.** v2 tokens
+  carry the active organization in a nested `o` claim rather than a top-level
+  `org_id`, but `ClerkAuthMiddleware` and the DRF authentication classes all
+  read the flat key. The flat org claims (`org_id`, `org_slug`, `org_role`, and
+  `org_permissions`) are now synthesised from `o` for v2 tokens. v1 tokens are
+  unchanged.
+- Session tokens now verify without `clerk-backend-api` installed. Verification
+  moved to `django_clerk_users.clerk_api.tokens`, which does RS256 against the
+  authenticated JWKS endpoint with a bounded single refresh for key rotation.
+  Semantics are a deliberate port of the SDK's, so the set of accepted tokens
+  is unchanged.
+- Added `CLERK_JWT_KEY` for fully networkless verification against a static PEM
+  public key, skipping the JWKS request entirely.
+- `clerk-backend-api` is no longer imported at module scope. It is imported
+  lazily when a server API call needs it, and a missing install now raises
+  `ClerkConfigurationError` with an actionable message instead of failing at
+  Django startup.
+- Declared `pyjwt` as a direct dependency. It is the same library the Clerk SDK
+  uses internally; it just no longer arrives as a transitive.
+
 - Added `django_clerk_users.clerk_api`, a thin Clerk HTTP client core: a
   recursive `ClerkObject` response type that is both attribute-accessible and a
   `Mapping`, and a `ClerkTransport` built on httpx that honours `timeout_ms`.
