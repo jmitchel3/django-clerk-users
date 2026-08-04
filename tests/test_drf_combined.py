@@ -277,6 +277,11 @@ def test_authentication_classes_explain_missing_optional_dependency(
     monkeypatch, authentication_class
 ):
     monkeypatch.setattr(drf, "_drf_available", False)
+    monkeypatch.setattr(
+        drf,
+        "_drf_import_error",
+        "Django REST Framework is required for ClerkAuthentication.",
+    )
 
     with pytest.raises(ImportError, match="Django REST Framework is required"):
         authentication_class()

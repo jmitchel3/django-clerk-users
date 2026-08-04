@@ -37,6 +37,8 @@ Outcome: raise verified statement and branch coverage to 100% for five authentic
   126 to 84.
 - `uv run ruff check` on all five changed test files — passed.
 - `uv run ruff format --check` on all five changed test files — passed.
+- Optional dependency matrix: `uv run tox run -e py312-django52-drf` — 31
+  passed with DRF installed.
 - `git diff --check` — passed.
 
 ## Delivered result
