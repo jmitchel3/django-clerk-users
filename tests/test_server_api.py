@@ -583,3 +583,323 @@ def test_send_and_revoke_clerk_invitation():
         invitation_id="inv_123",
         timeout_ms=250,
     )
+
+
+def test_resolve_clerk_client_handles_configuration_error():
+    with (
+        patch(
+            "django_clerk_users.server_api.get_configured_clerk_secret_key",
+            return_value="sk_test_configured",
+        ),
+        patch(
+            "django_clerk_users.server_api.get_clerk_client",
+            side_effect=server_api.ClerkConfigurationError("invalid"),
+        ),
+    ):
+        assert server_api._resolve_clerk_client() is None
+
+
+def test_plain_data_handles_sdk_models_objects_tuples_and_opaque_values():
+    class SdkModel:
+        def model_dump(self, **kwargs):
+            assert kwargs == {"mode": "json", "exclude_none": True}
+            return {"id": "sdk_123"}
+
+    class PublicObject:
+        def __init__(self):
+            self.visible = SimpleNamespace(value=1)
+            self._private = "skip"
+
+    class Opaque:
+        __slots__ = ()
+
+    opaque = Opaque()
+
+    assert server_api._plain_data(SdkModel()) == {"id": "sdk_123"}
+    assert server_api._plain_data(PublicObject()) == {"visible": {"value": 1}}
+    assert server_api._plain_data((1, {"nested": True})) == [1, {"nested": True}]
+    assert server_api._plain_data(opaque) is opaque
+    assert server_api._list_data(None) == []
+
+
+def test_duplicate_error_helpers_scan_all_errors():
+    exc = RuntimeError("multiple errors")
+    exc.data = {
+        "errors": [
+            {"code": "unrelated", "meta": {}},
+            {
+                "code": "form_identifier_not_unique",
+                "meta": {"param_names": ["username"]},
+            },
+        ]
+    }
+
+    assert server_api._has_duplicate_identifier_error(exc) is True
+    assert server_api._duplicate_error_params(exc) == {"username"}
+
+
+def test_create_clerk_user_forwards_all_metadata_fields():
+    client = make_client()
+    client.users.create.return_value = {"id": "user_metadata"}
+
+    assert server_api.create_clerk_user(
+        "metadata@example.com",
+        private_metadata={"private": True},
+        unsafe_metadata={"unsafe": True},
+        clerk_client=client,
+    ) == {"id": "user_metadata"}
+    client.users.create.assert_called_once_with(
+        email_address=["metadata@example.com"],
+        first_name="",
+        last_name="",
+        skip_password_requirement=True,
+        private_metadata={"private": True},
+        unsafe_metadata={"unsafe": True},
+        timeout_ms=10_000,
+    )
+
+
+def test_create_clerk_user_reports_regular_and_irrelevant_duplicate_errors():
+    client = make_client()
+    client.users.create.side_effect = RuntimeError("service unavailable")
+    assert (
+        server_api.create_clerk_user("failed@example.com", clerk_client=client) is None
+    )
+
+    client.users.create.side_effect = FakeClerkIdentifierError(params=["username"])
+    assert (
+        server_api.create_clerk_user("collision@example.com", clerk_client=client)
+        is None
+    )
+
+
+def test_create_clerk_user_stops_after_derived_username_retry_ceiling():
+    client = make_client()
+    client.users.create.side_effect = FakeClerkIdentifierError(params=["username"])
+
+    with patch(
+        "django_clerk_users.server_api.derive_clerk_username",
+        side_effect=[f"collision_{index}" for index in range(5)],
+    ):
+        assert (
+            server_api.create_clerk_user(
+                "collision@example.com", auto_username=True, clerk_client=client
+            )
+            is None
+        )
+
+    assert client.users.create.call_count == 5
+
+
+def test_user_lookup_and_fetch_cover_missing_client_and_api_errors():
+    client = make_client()
+    client.users.list.side_effect = RuntimeError("lookup failed")
+    client.users.get.side_effect = [
+        {"id": "user_123"},
+        RuntimeError("fetch failed"),
+    ]
+
+    with patch.object(server_api, "_resolve_clerk_client", return_value=None):
+        assert server_api.get_clerk_user_by_email("none@example.com") is None
+        assert server_api.get_clerk_user("user_none") is None
+
+    assert (
+        server_api.get_clerk_user_by_email("failed@example.com", clerk_client=client)
+        is None
+    )
+    assert server_api.get_clerk_user("user_123", clerk_client=client) == {
+        "id": "user_123"
+    }
+    assert server_api.get_clerk_user("user_failed", clerk_client=client) is None
+
+
+def test_update_clerk_user_covers_no_client_noop_all_fields_and_failure():
+    with patch.object(server_api, "_resolve_clerk_client", return_value=None):
+        assert server_api.update_clerk_user("user_none", first_name="No") is False
+
+    client = make_client()
+    assert server_api.update_clerk_user("user_noop", clerk_client=client) is True
+    client.users.update.assert_not_called()
+
+    assert (
+        server_api.update_clerk_user(
+            "user_123",
+            first_name="Ada",
+            last_name="Lovelace",
+            public_metadata={"public": True},
+            private_metadata={"private": True},
+            unsafe_metadata={"unsafe": True},
+            clerk_client=client,
+            timeout_ms=250,
+        )
+        is True
+    )
+    client.users.update.assert_called_once_with(
+        user_id="user_123",
+        first_name="Ada",
+        last_name="Lovelace",
+        public_metadata={"public": True},
+        private_metadata={"private": True},
+        unsafe_metadata={"unsafe": True},
+        timeout_ms=250,
+    )
+
+    client.users.update.side_effect = RuntimeError("update failed")
+    assert (
+        server_api.update_clerk_user(
+            "user_failed", first_name="Failed", clerk_client=client
+        )
+        is False
+    )
+
+
+def test_public_metadata_update_covers_missing_client_and_failure():
+    with patch.object(server_api, "_resolve_clerk_client", return_value=None):
+        assert server_api.update_clerk_user_public_metadata("user_none", {}) is False
+
+    client = make_client()
+    client.users.get.side_effect = RuntimeError("fetch failed")
+    assert (
+        server_api.update_clerk_user_public_metadata(
+            "user_failed", {"new": True}, clerk_client=client
+        )
+        is False
+    )
+
+
+def test_set_clerk_user_email_covers_missing_client_prune_edges_and_failures():
+    with patch.object(server_api, "_resolve_clerk_client", return_value=None):
+        assert server_api.set_clerk_user_email("user_none", "none@example.com") is False
+
+    client = make_client()
+    client.email_addresses.create.return_value = {}
+    assert (
+        server_api.set_clerk_user_email(
+            "user_no_id", "new@example.com", clerk_client=client
+        )
+        is True
+    )
+    client.users.get.assert_not_called()
+
+    client.email_addresses.create.return_value = {"id": "email_new"}
+    client.users.get.return_value = {"email_addresses": [{"id": "email_old"}]}
+    client.email_addresses.delete.side_effect = RuntimeError("delete failed")
+    assert (
+        server_api.set_clerk_user_email(
+            "user_delete_failed", "new@example.com", clerk_client=client
+        )
+        is True
+    )
+
+    client.email_addresses.create.side_effect = RuntimeError("create failed")
+    assert (
+        server_api.set_clerk_user_email(
+            "user_create_failed", "new@example.com", clerk_client=client
+        )
+        is False
+    )
+
+
+def test_sign_in_helpers_cover_missing_client_and_missing_inputs():
+    with patch.object(server_api, "_resolve_clerk_client", return_value=None):
+        assert server_api.create_clerk_sign_in_token("user_none") is None
+
+    assert server_api.build_clerk_sign_in_url("", "token") == ""
+    assert server_api.build_clerk_sign_in_url("https://app.example.com", "") == ""
+
+    with patch.object(server_api, "create_clerk_sign_in_token", return_value=None):
+        assert (
+            server_api.create_clerk_sign_in_link(
+                "user_123", "https://app.example.com/sign-in"
+            )
+            == ""
+        )
+
+
+def test_provision_access_link_covers_creation_failure_and_missing_ids():
+    with patch.object(server_api, "create_clerk_user", return_value=None):
+        failed = server_api.provision_clerk_user_access_link(
+            "failed@example.com", "https://app.example.com/sign-in"
+        )
+    assert failed["clerk_user_id"] is None
+    assert failed["no_key"] is False
+
+    with (
+        patch.object(
+            server_api,
+            "create_clerk_user",
+            return_value={"already_exists": True, "email": "missing@example.com"},
+        ),
+        patch.object(server_api, "get_clerk_user_by_email", return_value=None),
+    ):
+        missing = server_api.provision_clerk_user_access_link(
+            "missing@example.com", "https://app.example.com/sign-in"
+        )
+    assert missing["clerk_user_id"] is None
+    assert missing["already_exists"] is True
+
+    with (
+        patch.object(
+            server_api, "create_clerk_user", return_value={"id": "user_created"}
+        ),
+        patch.object(server_api, "create_clerk_sign_in_token", return_value=None),
+    ):
+        created = server_api.provision_clerk_user_access_link(
+            "created@example.com", "https://app.example.com/sign-in"
+        )
+    assert created == {
+        "clerk_user_id": "user_created",
+        "access_link": "",
+        "sign_in_token": "",
+        "created": True,
+        "already_exists": False,
+        "no_key": False,
+    }
+
+
+def test_session_revoke_covers_missing_client_and_api_failure():
+    with patch.object(server_api, "_resolve_clerk_client", return_value=None):
+        assert server_api.revoke_clerk_user_sessions("user_none") is None
+
+    client = make_client()
+    client.sessions.list.side_effect = RuntimeError("list failed")
+    assert (
+        server_api.revoke_clerk_user_sessions("user_failed", clerk_client=client)
+        is None
+    )
+
+
+def test_invitation_helpers_cover_missing_client_options_and_failures():
+    with patch.object(server_api, "_resolve_clerk_client", return_value=None):
+        assert server_api.send_clerk_invitation("none@example.com") is None
+        assert server_api.revoke_clerk_invitation("inv_none") is False
+
+    client = make_client()
+    client.invitations.create.return_value = {"id": "inv_options"}
+    assert server_api.send_clerk_invitation(
+        "options@example.com",
+        expires_in_days=7,
+        template_slug="custom-template",
+        clerk_client=client,
+    ) == {"id": "inv_options"}
+    client.invitations.create.assert_called_once_with(
+        request={
+            "email_address": "options@example.com",
+            "notify": True,
+            "ignore_existing": True,
+            "expires_in_days": 7,
+            "template_slug": "custom-template",
+        },
+        timeout_ms=10_000,
+    )
+
+    client.invitations.create.side_effect = RuntimeError("invite failed")
+    assert (
+        server_api.send_clerk_invitation("failed@example.com", clerk_client=client)
+        is None
+    )
+
+    client.invitations.revoke.side_effect = RuntimeError("revoke failed")
+    assert (
+        server_api.revoke_clerk_invitation("inv_failed", clerk_client=client) is False
+    )
