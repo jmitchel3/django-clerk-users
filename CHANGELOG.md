@@ -2,6 +2,15 @@
 
 All notable changes to `django-clerk-users` are documented here.
 
+## 0.3.4 - 2026-08-03
+
+- Declared `cryptography>=45` with no upper bound so the package tracks new
+  `cryptography` releases instead of being held to a pinned version.
+- Raised the `clerk-backend-api` floor to `>=6.0.1`, which lifts that SDK's own
+  `cryptography` ceiling from `<46` to `<49` and lets resolvers pick up newer
+  releases. `cryptography` 50 is verified working against the test suite but is
+  still blocked by the `clerk-backend-api` upper bound.
+
 ## 0.3.3 - 2026-07-18
 
 - Exposed the active Clerk organization id as `request.org` from the DRF

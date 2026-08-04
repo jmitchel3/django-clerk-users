@@ -5,7 +5,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "django-clerk-users"
-version = "0.3.3"
+version = "0.3.4"
 description = "Integrate Clerk with Django"
 readme = "README.md"
 license = "MIT"
@@ -27,7 +27,8 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-  "clerk-backend-api>=1",
+  "clerk-backend-api>=6.0.1",
+  "cryptography>=45",
   "django>=4.2,<7.0",
   "svix>=1",
 ]
