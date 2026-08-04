@@ -186,3 +186,130 @@ def test_organization_middleware_order_error_when_before_clerk_auth_middleware()
 )
 def test_organization_middleware_order_error_when_clerk_auth_middleware_missing():
     assert "django_clerk_users.E002" in _check_ids()
+
+
+def test_configured_secret_key_satisfies_authentication_check(monkeypatch):
+    from django_clerk_users import checks
+
+    monkeypatch.setattr(checks, "_clerk_authentication_enabled", lambda: True)
+    monkeypatch.setattr(
+        checks, "get_configured_clerk_secret_key", lambda: "sk_test_real"
+    )
+
+    assert checks._check_secret_key() == []
+
+
+@override_settings(REST_FRAMEWORK=[])
+def test_non_mapping_drf_settings_disable_clerk_authentication():
+    from django_clerk_users import checks
+
+    assert checks._drf_clerk_authentication_enabled() is False
+
+
+def test_configured_class_paths_normalize_strings_classes_and_invalid_values():
+    from django_clerk_users import checks
+
+    class AuthenticationClass:
+        pass
+
+    assert list(checks._configured_class_paths("package.Authentication")) == [
+        "package.Authentication"
+    ]
+    assert list(checks._configured_class_paths(123)) == []
+    assert list(checks._configured_class_paths([AuthenticationClass, object()])) == [
+        f"{AuthenticationClass.__module__}.{AuthenticationClass.__name__}"
+    ]
+
+
+@override_settings(CLERK_AUTH_PARTIES="https://app.example.com")
+def test_configured_auth_parties_take_precedence_over_frontend_hosts():
+    from django_clerk_users import checks
+
+    assert checks._configured_auth_parties() == ["https://app.example.com"]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, []),
+        (b" first, second ", ["first", "second"]),
+        (b"\xff", []),
+        (object(), []),
+        ([None, b"\xff", " valid "], ["valid"]),
+        (["", "valid"], ["valid"]),
+    ],
+)
+def test_string_list_handles_configuration_edge_cases(value, expected):
+    from django_clerk_users import checks
+
+    assert checks._string_list(value) == expected
+
+
+def test_webhook_urlconf_lookup_failure_is_safe(monkeypatch):
+    from django_clerk_users import checks
+
+    def broken_resolver():
+        raise RuntimeError("URLconf unavailable")
+
+    monkeypatch.setattr(checks, "get_resolver", broken_resolver)
+
+    assert checks._urlconf_uses_default_clerk_webhook_view() is False
+
+
+def test_url_pattern_iterator_descends_and_skips_broken_resolvers(monkeypatch):
+    from django_clerk_users import checks
+
+    class FakePattern:
+        pass
+
+    class FakeResolver:
+        def __init__(self, patterns=None, *, broken=False):
+            self.patterns = patterns
+            self.broken = broken
+
+        @property
+        def url_patterns(self):
+            if self.broken:
+                raise RuntimeError("lazy URLconf failed")
+            return self.patterns
+
+    monkeypatch.setattr(checks, "URLPattern", FakePattern)
+    monkeypatch.setattr(checks, "URLResolver", FakeResolver)
+    leaf = FakePattern()
+
+    assert list(
+        checks._iter_url_patterns(
+            [object(), FakeResolver([leaf]), FakeResolver(broken=True)]
+        )
+    ) == [leaf]
+    assert list(checks._iter_url_patterns([])) == []
+
+
+def test_pattern_callback_lookup_failure_is_safe(monkeypatch):
+    from django_clerk_users import checks
+
+    class BrokenPattern:
+        @property
+        def callback(self):
+            raise RuntimeError("callback unavailable")
+
+    assert checks._pattern_uses_view(BrokenPattern(), object()) is False
+
+
+def test_same_view_follows_wrappers_and_detects_cycles():
+    from django_clerk_users import checks
+
+    def view():
+        pass
+
+    def wrapper():
+        pass
+
+    wrapper.__wrapped__ = view
+    loop = type("Loop", (), {})()
+    loop.__wrapped__ = loop
+
+    assert checks._same_view(view, view) is True
+    assert checks._same_view(wrapper, view) is True
+    assert checks._same_view(loop, view) is False
+    assert checks._same_view(None, view) is False
