@@ -406,6 +406,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "django" },
     { name = "httpx" },
+    { name = "pyjwt" },
     { name = "svix" },
 ]
 
@@ -433,9 +434,10 @@ dev = [
 requires-dist = [
     { name = "clerk-backend-api", specifier = ">=6.0.1" },
     { name = "cryptography", specifier = ">=45" },
-    { name = "django", specifier = ">=4.2,<7.0" },
+    { name = "django", specifier = ">=4.2,<7" },
     { name = "djangorestframework", marker = "extra == 'drf'", specifier = ">=3.14" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "pyjwt", specifier = ">=2.8" },
     { name = "svix", specifier = ">=1" },
 ]
 provides-extras = ["drf"]
@@ -446,7 +448,7 @@ dev = [
     { name = "pip", specifier = ">=25.3" },
     { name = "pre-commit", specifier = ">=4.4" },
     { name = "pytest", specifier = ">=9" },
-    { name = "pytest-cov", specifier = ">=7.0.0" },
+    { name = "pytest-cov", specifier = ">=7" },
     { name = "pytest-django", specifier = ">=4.9" },
     { name = "python-dotenv", specifier = ">=1" },
     { name = "rav", specifier = ">=0.1.1" },

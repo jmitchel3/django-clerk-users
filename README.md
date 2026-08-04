@@ -560,6 +560,7 @@ CLERK_DISABLE_PASSWORD_SYNC = True
 | `CLERK_WEBHOOK_SIGNING_KEY` | Yes* | - | Webhook signing secret (*required for webhooks) |
 | `CLERK_FRONTEND_HOSTS` | Yes | `[]` | Authorized frontend URLs |
 | `CLERK_AUTH_PARTIES` | No | `[]` | Alias for `CLERK_FRONTEND_HOSTS` |
+| `CLERK_JWT_KEY` | No | - | PEM public key for networkless token verification (skips the JWKS request) |
 | `CLERK_SESSION_REVALIDATION_SECONDS` | No | `300` | JWT revalidation interval (seconds) |
 | `CLERK_CACHE_TIMEOUT` | No | `300` | User cache timeout (seconds) |
 | `CLERK_ORG_CACHE_TIMEOUT` | No | `900` | Organization cache timeout (seconds) |

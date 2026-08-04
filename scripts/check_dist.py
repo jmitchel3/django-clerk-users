@@ -130,6 +130,9 @@ def _check_wheel(version: str) -> None:
             # Direct dependency of the thin Clerk client rather than a svix
             # transitive, so it must be declared in the wheel metadata.
             "Requires-Dist: httpx>=0.27",
+            # Session token verification uses PyJWT directly rather than
+            # reaching it through the clerk-backend-api transitive.
+            "Requires-Dist: pyjwt>=2.8",
             "Requires-Dist: svix>=1",
             "Provides-Extra: drf",
             "Requires-Dist: djangorestframework>=3.14; extra == 'drf'",
