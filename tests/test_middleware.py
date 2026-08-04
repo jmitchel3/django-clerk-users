@@ -3,6 +3,7 @@ Tests for django-clerk-users middleware.
 """
 
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -253,6 +254,20 @@ class TestMiddlewareSessionHandling:
         assert request.clerk_user == clerk_user
         assert request.org == "org_123"
 
+    def test_traditional_django_session_skips_clerk_authentication(
+        self, middleware, request_factory, clerk_user
+    ):
+        request = make_request_with_session(request_factory)
+        request.user = clerk_user
+
+        with patch(
+            "django_clerk_users.middleware.auth.get_clerk_payload_from_request"
+        ) as get_payload:
+            middleware.process_request(request)
+
+        get_payload.assert_not_called()
+        assert request.user is clerk_user
+
 
 class TestMiddlewareInactiveUser:
     """Test middleware with inactive users."""
@@ -352,6 +367,25 @@ class TestMiddlewareErrorHandling:
                 with pytest.raises(RuntimeError, match="Unexpected error"):
                     middleware.process_request(request)
 
+    def test_non_debug_mode_makes_unexpected_errors_anonymous(
+        self, middleware, request_factory
+    ):
+        request = make_request_with_session(request_factory)
+
+        with (
+            patch(
+                "django_clerk_users.middleware.auth.get_clerk_payload_from_request",
+                return_value={"sub": "user_error"},
+            ),
+            patch(
+                "django_clerk_users.middleware.auth.get_or_create_user_from_payload",
+                side_effect=RuntimeError("Unexpected error"),
+            ),
+        ):
+            middleware.process_request(request)
+
+        assert isinstance(request.user, AnonymousUser)
+
 
 class TestMiddlewareRevalidation:
     """Test session revalidation."""
@@ -397,6 +431,153 @@ class TestMiddlewareRevalidation:
         get_payload.assert_not_called()
         assert request.clerk_user == clerk_user
         assert request.org == "org_existing"
+
+    def test_invalid_revalidation_interval_uses_default(self, settings):
+        from django_clerk_users.middleware.auth import (
+            DEFAULT_CLERK_SESSION_REVALIDATION_SECONDS,
+            _get_session_revalidation_seconds,
+        )
+
+        settings.CLERK_SESSION_REVALIDATION_SECONDS = "invalid"
+
+        assert (
+            _get_session_revalidation_seconds()
+            == DEFAULT_CLERK_SESSION_REVALIDATION_SECONDS
+        )
+
+    def test_unauthenticated_request_has_no_valid_session(self, middleware):
+        assert middleware._is_session_valid(SimpleNamespace()) is False
+
+    def test_revalidation_without_payload_clears_session(
+        self, middleware, request_factory, clerk_user, settings
+    ):
+        settings.CLERK_SESSION_REVALIDATION_SECONDS = 0
+        request = make_request_with_session(request_factory)
+        request.user = clerk_user
+        request.session["last_clerk_check"] = int(time.time()) - 1
+
+        with (
+            patch(
+                "django_clerk_users.middleware.auth.get_clerk_payload_from_request",
+                return_value=None,
+            ),
+            patch.object(middleware, "_clear_session") as clear_session,
+        ):
+            assert middleware._is_session_valid(request) is False
+
+        clear_session.assert_called_once_with(request)
+
+    def test_revalidation_token_error_clears_session(
+        self, middleware, request_factory, clerk_user, settings
+    ):
+        from django_clerk_users.exceptions import ClerkTokenError
+
+        settings.CLERK_SESSION_REVALIDATION_SECONDS = 0
+        request = make_request_with_session(request_factory)
+        request.user = clerk_user
+        request.session["last_clerk_check"] = int(time.time()) - 1
+
+        with (
+            patch(
+                "django_clerk_users.middleware.auth.get_clerk_payload_from_request",
+                side_effect=ClerkTokenError("expired"),
+            ),
+            patch.object(middleware, "_clear_session") as clear_session,
+        ):
+            assert middleware._is_session_valid(request) is False
+
+        clear_session.assert_called_once_with(request)
+
+    def test_expired_clerk_session_is_cleared_before_jwt_fallback(
+        self, middleware, request_factory, clerk_user
+    ):
+        request = make_request_with_session(request_factory)
+        request.user = clerk_user
+        request.session["last_clerk_check"] = int(time.time())
+
+        with (
+            patch.object(middleware, "_is_session_valid", return_value=False),
+            patch.object(middleware, "_clear_session") as clear_session,
+            patch(
+                "django_clerk_users.middleware.auth.get_clerk_payload_from_request",
+                return_value=None,
+            ),
+        ):
+            middleware.process_request(request)
+
+        clear_session.assert_called_once_with(request)
+        assert isinstance(request.user, AnonymousUser)
+
+
+class TestMiddlewareSessionInternals:
+    def test_existing_matching_auth_session_is_reused(
+        self, middleware, request_factory, clerk_user
+    ):
+        request = make_request_with_session(request_factory)
+        request.session["_auth_user_id"] = str(clerk_user.pk)
+        request.session["_auth_user_hash"] = clerk_user.get_session_auth_hash()
+
+        with (
+            patch.object(
+                request.session, "flush", wraps=request.session.flush
+            ) as flush,
+            patch("django_clerk_users.middleware.auth.rotate_token"),
+        ):
+            middleware._create_session(request, clerk_user, {"org_id": "org_123"})
+
+        flush.assert_not_called()
+        assert request.session["clerk_org_id"] == "org_123"
+
+    def test_conflicting_auth_session_is_flushed(
+        self, middleware, request_factory, clerk_user
+    ):
+        request = make_request_with_session(request_factory)
+        request.session["_auth_user_id"] = "different-user"
+
+        with (
+            patch.object(
+                request.session, "flush", wraps=request.session.flush
+            ) as flush,
+            patch("django_clerk_users.middleware.auth.rotate_token"),
+        ):
+            middleware._create_session(request, clerk_user, {})
+
+        flush.assert_called_once_with()
+
+    def test_create_session_supports_user_without_auth_hash(
+        self, middleware, request_factory
+    ):
+        user = SimpleNamespace(
+            email="hashless@example.com",
+            _meta=SimpleNamespace(
+                pk=SimpleNamespace(value_to_string=lambda value: "hashless-user")
+            ),
+        )
+        request = make_request_with_session(request_factory)
+        request.session["_auth_user_id"] = "hashless-user"
+
+        with patch("django_clerk_users.middleware.auth.rotate_token"):
+            middleware._create_session(request, user, {})
+
+        assert request.session["_auth_user_hash"] == ""
+
+    def test_set_anonymous_replaces_authenticated_user(
+        self, middleware, request_factory, clerk_user
+    ):
+        request = make_request_with_session(request_factory)
+        request.user = clerk_user
+
+        middleware._set_anonymous(request)
+
+        assert isinstance(request.user, AnonymousUser)
+
+    def test_clear_session_flushes_session(self, middleware, request_factory):
+        request = make_request_with_session(request_factory)
+
+        with patch.object(request.session, "flush") as flush:
+            middleware._clear_session(request)
+
+        flush.assert_called_once_with()
 
 
 class TestMiddlewareCall:

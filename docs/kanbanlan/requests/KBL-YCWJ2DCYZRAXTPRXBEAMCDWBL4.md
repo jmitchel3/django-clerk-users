@@ -68,5 +68,5 @@ and each of the ten scoped modules now has complete statement and branch
 coverage.
 
 The repository-wide 100% objective remains active. The remaining gaps are
-concentrated in eight larger modules and will be handled by later grouped
+concentrated in eleven larger modules and will be handled by later grouped
 Kanbanlan requests.

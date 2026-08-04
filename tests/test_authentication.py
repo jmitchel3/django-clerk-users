@@ -4,7 +4,7 @@ Tests for django-clerk-users authentication backend.
 
 import time
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -346,6 +346,230 @@ class TestClerkPayloadFromRequest:
         ):
             with pytest.raises(ClerkTokenError, match="token expired"):
                 get_clerk_payload_from_request(request)
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (None, []),
+            (b"https://app.example.com", ["https://app.example.com"]),
+            (b"\xff", []),
+            (object(), []),
+        ],
+    )
+    def test_auth_parties_normalize_top_level_setting_values(
+        self, settings, value, expected
+    ):
+        from django_clerk_users.authentication.utils import _get_auth_parties
+
+        settings.CLERK_AUTH_PARTIES = value
+
+        assert _get_auth_parties() == expected
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (b"  public-key  ", "public-key"),
+            (b"\xff", None),
+            (123, None),
+            ("   ", None),
+        ],
+    )
+    def test_jwt_key_normalization(self, settings, value, expected):
+        from django_clerk_users.authentication.utils import _get_jwt_key
+
+        settings.CLERK_JWT_KEY = value
+
+        assert _get_jwt_key() == expected
+
+    def test_nonpositive_cache_timeout_disables_payload_caching(self, settings):
+        from django_clerk_users.authentication.utils import _payload_cache_timeout
+
+        settings.CLERK_CACHE_TIMEOUT = 0
+
+        assert _payload_cache_timeout({"exp": 9999999999}, now=1) == 0
+
+    def test_invalid_exp_uses_configured_cache_timeout(self, settings):
+        from django_clerk_users.authentication.utils import _payload_cache_timeout
+
+        settings.CLERK_CACHE_TIMEOUT = 123
+
+        assert _payload_cache_timeout({"exp": "invalid"}, now=1) == 123
+
+    def test_bearer_token_accepts_bytes_header(self):
+        from django_clerk_users.authentication.utils import get_bearer_token
+
+        request = RequestFactory().get("/")
+        request.headers = {"Authorization": b"Bearer bytes-token"}
+
+        assert get_bearer_token(request) == "bytes-token"
+
+    def test_missing_bearer_token_returns_none(self):
+        from django_clerk_users.authentication.utils import (
+            get_clerk_payload_from_request,
+        )
+
+        assert get_clerk_payload_from_request(RequestFactory().get("/")) is None
+
+    def test_cached_payload_skips_verification(self):
+        from django_clerk_users.authentication.utils import (
+            get_clerk_payload_from_request,
+        )
+
+        request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer cached")
+        payload = {"sub": "user_cached"}
+
+        with (
+            patch(
+                "django_clerk_users.authentication.utils.cache.get",
+                return_value=payload,
+            ),
+            patch(
+                "django_clerk_users.authentication.utils.authenticate_session_token"
+            ) as verify,
+        ):
+            assert get_clerk_payload_from_request(request) == payload
+
+        verify.assert_not_called()
+
+    def test_unconfigured_clerk_returns_none_for_present_token(self, settings):
+        from django_clerk_users.authentication.utils import (
+            get_clerk_payload_from_request,
+        )
+
+        settings.CLERK_SECRET_KEY = ""
+        settings.CLERK_JWT_KEY = None
+        request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer token")
+
+        with patch(
+            "django_clerk_users.authentication.utils.cache.get", return_value=None
+        ):
+            assert get_clerk_payload_from_request(request) is None
+
+    @pytest.mark.parametrize(
+        "request_state",
+        [
+            SimpleNamespace(is_signed_in=False, reason=None, message="bad signature"),
+            SimpleNamespace(is_signed_in=False, reason=None, message=None),
+        ],
+    )
+    def test_unsigned_request_uses_message_or_default_reason(
+        self, settings, request_state
+    ):
+        from django_clerk_users.authentication.utils import (
+            get_clerk_payload_from_request,
+        )
+
+        settings.CLERK_SECRET_KEY = "sk_test_unit_auth_secret"
+        request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer invalid")
+
+        with (
+            patch(
+                "django_clerk_users.authentication.utils.cache.get", return_value=None
+            ),
+            patch(
+                "django_clerk_users.authentication.utils.authenticate_session_token",
+                return_value=request_state,
+            ),
+        ):
+            with pytest.raises(ClerkTokenError, match="Token validation failed"):
+                get_clerk_payload_from_request(request)
+
+    def test_signed_in_request_without_payload_raises(self, settings):
+        from django_clerk_users.authentication.utils import (
+            get_clerk_payload_from_request,
+        )
+
+        settings.CLERK_SECRET_KEY = "sk_test_unit_auth_secret"
+        request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer empty")
+        request_state = SimpleNamespace(is_signed_in=True, payload=None)
+
+        with (
+            patch(
+                "django_clerk_users.authentication.utils.cache.get", return_value=None
+            ),
+            patch(
+                "django_clerk_users.authentication.utils.authenticate_session_token",
+                return_value=request_state,
+            ),
+        ):
+            with pytest.raises(ClerkTokenError, match="no payload"):
+                get_clerk_payload_from_request(request)
+
+    def test_verification_errors_are_wrapped_as_token_errors(self, settings):
+        from django_clerk_users.authentication.utils import (
+            get_clerk_payload_from_request,
+        )
+
+        settings.CLERK_SECRET_KEY = "sk_test_unit_auth_secret"
+        request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer broken")
+
+        with (
+            patch(
+                "django_clerk_users.authentication.utils.cache.get", return_value=None
+            ),
+            patch(
+                "django_clerk_users.authentication.utils.authenticate_session_token",
+                side_effect=RuntimeError("SDK unavailable"),
+            ),
+        ):
+            with pytest.raises(ClerkTokenError, match="SDK unavailable"):
+                get_clerk_payload_from_request(request)
+
+
+class TestGetOrCreateUserFromPayload:
+    def test_missing_subject_is_rejected(self, db):
+        from django_clerk_users.authentication.utils import (
+            get_or_create_user_from_payload,
+        )
+        from django_clerk_users.exceptions import ClerkAuthenticationError
+
+        with pytest.raises(ClerkAuthenticationError, match="missing 'sub'"):
+            get_or_create_user_from_payload({})
+
+    def test_existing_user_is_returned_without_api_call(self, clerk_user):
+        from django_clerk_users.authentication.utils import (
+            get_or_create_user_from_payload,
+        )
+
+        with patch(
+            "django_clerk_users.utils.update_or_create_clerk_user"
+        ) as update_user:
+            assert get_or_create_user_from_payload({"sub": clerk_user.clerk_id}) == (
+                clerk_user,
+                False,
+            )
+
+        update_user.assert_not_called()
+
+    def test_missing_user_is_created_from_clerk(self, db):
+        from django_clerk_users.authentication.utils import (
+            get_or_create_user_from_payload,
+        )
+
+        created_user = MagicMock()
+        with patch(
+            "django_clerk_users.utils.update_or_create_clerk_user",
+            return_value=(created_user, True),
+        ) as update_user:
+            assert get_or_create_user_from_payload({"sub": "user_new"}) == (
+                created_user,
+                True,
+            )
+
+        update_user.assert_called_once_with("user_new")
+
+    def test_clerk_creation_error_is_wrapped(self, db):
+        from django_clerk_users.authentication.utils import (
+            get_or_create_user_from_payload,
+        )
+        from django_clerk_users.exceptions import ClerkAuthenticationError
+
+        with patch(
+            "django_clerk_users.utils.update_or_create_clerk_user",
+            side_effect=RuntimeError("API unavailable"),
+        ):
+            with pytest.raises(ClerkAuthenticationError, match="API unavailable"):
+                get_or_create_user_from_payload({"sub": "user_new"})
 
 
 class TestClerkClientConfiguration:

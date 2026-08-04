@@ -2,7 +2,8 @@
 Tests for django_clerk_users.testing module.
 """
 
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 
 class TestTestingHelpers:
@@ -335,6 +336,142 @@ class TestClerkTestClient:
         result = client.delete_user("user_test123")
 
         assert result is False
+
+    def test_client_is_loaded_lazily(self):
+        from django_clerk_users.testing import ClerkTestClient
+
+        configured_client = MagicMock()
+        client = ClerkTestClient()
+
+        with patch(
+            "django_clerk_users.testing.get_clerk_client",
+            return_value=configured_client,
+        ) as get_client:
+            assert client.client is configured_client
+            assert client.client is configured_client
+
+        get_client.assert_called_once_with()
+
+    def test_create_user_accepts_explicit_email_password_and_phone_without_auto_email(
+        self,
+    ):
+        from django_clerk_users.testing import ClerkTestClient
+
+        mock_clerk = MagicMock()
+        mock_user = MagicMock()
+        mock_user.id = "user_explicit"
+        mock_user.first_name = "Test"
+        mock_user.last_name = "User"
+        mock_user.username = "explicit"
+        mock_user.email_addresses = [{"email_address": "explicit@example.com"}]
+        mock_user.phone_numbers = [{"phone_number": "+12015550123"}]
+        mock_clerk.users.create.return_value = mock_user
+
+        user = ClerkTestClient(clerk_client=mock_clerk).create_test_user(
+            email="explicit@example.com",
+            username="explicit",
+            password="secret",
+            phone_number="+12015550123",
+            skip_email=True,
+            public_metadata={"role": "tester"},
+        )
+
+        assert user.id == "user_explicit"
+        assert mock_clerk.users.create.call_args.kwargs == {
+            "first_name": "Test",
+            "last_name": "User",
+            "public_metadata": {"role": "tester"},
+            "email_address": ["explicit@example.com"],
+            "username": "explicit",
+            "password": "secret",
+            "phone_number": ["+12015550123"],
+            "timeout_ms": 10000,
+        }
+
+    def test_create_session_returns_mapping_response_unchanged(self):
+        from django_clerk_users.testing import ClerkTestClient
+
+        mock_clerk = MagicMock()
+        response = {"id": "sess_mapping", "user_id": "user_123"}
+        mock_clerk.sessions.create.return_value = response
+
+        assert (
+            ClerkTestClient(clerk_client=mock_clerk).create_session("user_123")
+            is response
+        )
+
+    def test_get_session_token_uses_existing_session_and_mapping_response(self):
+        from django_clerk_users.testing import ClerkTestClient
+
+        mock_clerk = MagicMock()
+        mock_clerk.sessions.create_token.return_value = {"jwt": "mapping-token"}
+        client = ClerkTestClient(clerk_client=mock_clerk)
+
+        assert (
+            client.get_session_token("user_123", session_id="sess_existing")
+            == "mapping-token"
+        )
+        mock_clerk.sessions.create.assert_not_called()
+        mock_clerk.sessions.create_token.assert_called_once_with(
+            session_id="sess_existing", timeout_ms=10000
+        )
+
+    def test_get_testing_token_supports_object_and_mapping_responses(self):
+        from django_clerk_users.testing import ClerkTestClient
+
+        mock_clerk = MagicMock()
+        client = ClerkTestClient(clerk_client=mock_clerk)
+        mock_clerk.testing_tokens.create.side_effect = [
+            SimpleNamespace(token="object-token"),
+            {"token": "mapping-token"},
+        ]
+
+        assert client.get_testing_token() == "object-token"
+        assert client.get_testing_token() == "mapping-token"
+
+
+def test_clerk_test_mixin_manages_users_tokens_and_parent_hooks():
+    from django_clerk_users.testing import ClerkTestMixin
+
+    events = []
+
+    class Parent:
+        def setUp(self):
+            events.append("parent-setup")
+
+        def tearDown(self):
+            events.append("parent-teardown")
+
+    class Harness(ClerkTestMixin, Parent):
+        pass
+
+    default_user = SimpleNamespace(id="user_default")
+    extra_user = SimpleNamespace(id="user_extra")
+    explicit_user = SimpleNamespace(id="user_explicit")
+    mock_client = MagicMock()
+    mock_client.create_test_user.side_effect = [default_user, extra_user]
+    mock_client.get_session_token.side_effect = ["default-token", "explicit-token"]
+
+    with patch("django_clerk_users.testing.ClerkTestClient", return_value=mock_client):
+        harness = Harness()
+        harness.setUp()
+        assert harness.test_user is default_user
+        assert harness.session_token == "default-token"
+        assert harness.get_auth_header() == {
+            "HTTP_AUTHORIZATION": "Bearer default-token"
+        }
+        assert harness.get_auth_header(explicit_user) == {
+            "HTTP_AUTHORIZATION": "Bearer explicit-token"
+        }
+        assert harness.create_test_user(role="admin") is extra_user
+        harness.tearDown()
+
+    assert events == ["parent-setup", "parent-teardown"]
+    assert harness._created_users == ["user_default", "user_extra"]
+    assert mock_client.delete_user.call_args_list == [
+        (("user_default",), {}),
+        (("user_extra",), {}),
+    ]
 
 
 class TestPackageExports:
