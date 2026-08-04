@@ -2,8 +2,11 @@
 Basic tests for django-clerk-users package.
 """
 
+import builtins
+import importlib.metadata
 import os
 from pathlib import Path
+import runpy
 
 import pytest
 
@@ -35,6 +38,33 @@ class TestPackageImports:
         from django_clerk_users import __version__
 
         assert __version__ is not None
+
+    def test_version_falls_back_when_distribution_metadata_is_missing(
+        self, monkeypatch
+    ):
+        """Source checkouts without installed metadata expose a stable fallback."""
+        import django_clerk_users
+
+        def missing_distribution(_distribution_name):
+            raise importlib.metadata.PackageNotFoundError
+
+        monkeypatch.setattr(importlib.metadata, "version", missing_distribution)
+
+        namespace = runpy.run_path(
+            django_clerk_users.__file__, run_name="django_clerk_users_version_fallback"
+        )
+
+        assert namespace["__version__"] == "unknown"
+
+    def test_every_declared_public_export_resolves_lazily(self):
+        """The package facade must keep every name in ``__all__`` importable."""
+        import django_clerk_users
+
+        for name in django_clerk_users.__all__:
+            assert getattr(django_clerk_users, name) is not None, name
+
+        with pytest.raises(AttributeError, match="has no attribute 'not_public'"):
+            getattr(django_clerk_users, "not_public")
 
     def test_import_exceptions(self):
         """Test that exceptions can be imported."""
@@ -109,6 +139,72 @@ class TestPackageImports:
         assert _coerce_bool("yes", False) is True
         assert _coerce_bool(b"\xff", True) is True
         assert _coerce_bool("", True) is True
+
+    def test_string_list_handles_every_supported_and_invalid_shape(self):
+        from django_clerk_users.settings import _string_list
+
+        assert _string_list(None) == []
+        assert _string_list(b"one, two") == ["one", "two"]
+        assert _string_list(b"\xff") == []
+        assert _string_list("one, ,two") == ["one", "two"]
+        assert _string_list((None, b" one ", b"\xff", "", 2)) == ["one", "2"]
+        assert sorted(_string_list({"one", "two"})) == ["one", "two"]
+        assert _string_list(object()) == []
+
+    def test_integer_setting_falls_back_for_invalid_values(self, settings):
+        from django_clerk_users.settings import _int_setting
+
+        settings.CLERK_CACHE_TIMEOUT = "invalid"
+        assert _int_setting("CLERK_CACHE_TIMEOUT", 300) == 300
+
+        settings.CLERK_CACHE_TIMEOUT = None
+        assert _int_setting("CLERK_CACHE_TIMEOUT", 300) == 300
+
+        settings.CLERK_CACHE_TIMEOUT = "17"
+        assert _int_setting("CLERK_CACHE_TIMEOUT", 300) == 17
+
+    @pytest.mark.parametrize(
+        ("value", "default", "expected"),
+        [
+            (True, False, True),
+            (None, True, True),
+            (b" yes ", False, True),
+            (b"\xff", False, False),
+            ("OFF", True, False),
+            ("unknown", True, True),
+            (0, True, False),
+            (2, False, True),
+            (object(), True, True),
+        ],
+    )
+    def test_boolean_coercion_handles_all_input_types(self, value, default, expected):
+        from django_clerk_users.settings import _coerce_bool
+
+        assert _coerce_bool(value, default) is expected
+
+    def test_authentication_exports_degrade_cleanly_without_drf(self, monkeypatch):
+        """Core auth exports remain available when the optional DRF import fails."""
+        import django_clerk_users.authentication as authentication
+
+        real_import = builtins.__import__
+
+        def without_drf(name, *args, **kwargs):
+            if name == "django_clerk_users.authentication.drf":
+                raise ImportError("DRF is unavailable")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", without_drf)
+
+        namespace = runpy.run_path(
+            authentication.__file__,
+            run_name="django_clerk_users_authentication_without_drf",
+        )
+
+        assert namespace["__all__"] == [
+            "ClerkBackend",
+            "get_clerk_payload_from_request",
+            "get_or_create_user_from_payload",
+        ]
 
 
 class TestDjangoSetup:

@@ -11,6 +11,8 @@ from django.core.cache import cache
 from django_clerk_users.caching import (
     ORG_CACHE_PREFIX,
     USER_CACHE_PREFIX,
+    _get_org_cache_timeout,
+    _get_user_cache_timeout,
     get_cached_organization,
     get_cached_user,
     get_org_cache_key,
@@ -52,6 +54,17 @@ class TestCacheKeys:
         """Test organization cache key format."""
         key = get_org_cache_key("org_456")
         assert key == f"{ORG_CACHE_PREFIX}org_456"
+
+    def test_invalid_timeouts_fall_back_and_log(self, settings, caplog):
+        settings.CLERK_CACHE_TIMEOUT = "invalid"
+        settings.CLERK_ORG_CACHE_TIMEOUT = None
+
+        with caplog.at_level("WARNING"):
+            assert _get_user_cache_timeout() == 300
+            assert _get_org_cache_timeout() == 900
+
+        assert "Invalid CLERK_CACHE_TIMEOUT" in caplog.text
+        assert "Invalid CLERK_ORG_CACHE_TIMEOUT" in caplog.text
 
 
 class TestUserCaching:
@@ -165,6 +178,24 @@ class TestOrganizationCaching:
 
         assert get_cached_organization("org_cache") == organization
 
+    @pytest.mark.parametrize("clerk_id", ["", None])
+    def test_get_cached_organization_rejects_empty_ids(self, clerk_id):
+        assert get_cached_organization(clerk_id) is None
+
+    def test_get_cached_organization_can_skip_database(self):
+        assert get_cached_organization("org_uncached", query_db=False) is None
+
+    def test_get_cached_organization_returns_positive_cache_hit(self):
+        cached = {"id": "org_cached"}
+        cache.set(get_org_cache_key("org_cached"), cached)
+
+        assert get_cached_organization("org_cached", query_db=False) == cached
+
+    def test_get_cached_organization_returns_none_for_negative_cache_hit(self):
+        cache.set(get_org_cache_key("org_missing"), False)
+
+        assert get_cached_organization("org_missing", query_db=False) is None
+
     def test_get_cached_organization_not_found(self, db):
         """Test missing organizations are cached as False."""
         organization = get_cached_organization("org_missing")
@@ -193,6 +224,13 @@ class TestOrganizationCaching:
             False,
             timeout=23,
         )
+
+    def test_set_cached_organization_preserves_an_object(self):
+        organization = {"id": "org_cached"}
+
+        set_cached_organization("org_cached", organization)
+
+        assert cache.get(get_org_cache_key("org_cached")) == organization
 
     def test_invalidate_organization_cache(self):
         """Test invalidating organization cache."""
