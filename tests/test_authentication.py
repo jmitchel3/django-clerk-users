@@ -269,6 +269,87 @@ class TestClerkPayloadFromRequest:
         cache_set.assert_called_once()
         assert cache_set.call_args.kwargs["timeout"] == 300
 
+    def test_options_are_built_when_no_authorized_parties_configured(self, settings):
+        """Test verification still passes an options object with an empty allowlist.
+
+        The SDK reads ``options.secret_key`` unconditionally, so passing
+        ``options=None`` raises an AttributeError that surfaces as a generic
+        token failure.
+        """
+        from django_clerk_users.authentication.utils import (
+            get_clerk_payload_from_request,
+        )
+
+        cache.clear()
+        settings.CLERK_FRONTEND_HOSTS = []
+        settings.CLERK_AUTH_PARTIES = []
+        request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer token_no_azp")
+        payload = {"sub": "user_auth123"}
+        clerk = MagicMock()
+        clerk.authenticate_request.return_value = SimpleNamespace(
+            is_signed_in=True,
+            payload=payload,
+        )
+
+        with patch(
+            "django_clerk_users.authentication.utils.get_clerk_client",
+            return_value=clerk,
+        ):
+            result = get_clerk_payload_from_request(request)
+
+        assert result == payload
+        options = clerk.authenticate_request.call_args.kwargs["options"]
+        assert options is not None
+        # None, not [], so the SDK skips the azp check instead of treating it
+        # as an allowlist that matches nothing.
+        assert options.authorized_parties is None
+
+    def test_configured_authorized_parties_reach_the_sdk(self, settings):
+        """Test a configured allowlist is forwarded to the SDK options."""
+        from django_clerk_users.authentication.utils import (
+            get_clerk_payload_from_request,
+        )
+
+        cache.clear()
+        settings.CLERK_AUTH_PARTIES = ["https://app.example.com"]
+        request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer token_with_azp")
+        payload = {"sub": "user_auth123"}
+        clerk = MagicMock()
+        clerk.authenticate_request.return_value = SimpleNamespace(
+            is_signed_in=True,
+            payload=payload,
+        )
+
+        with patch(
+            "django_clerk_users.authentication.utils.get_clerk_client",
+            return_value=clerk,
+        ):
+            result = get_clerk_payload_from_request(request)
+
+        assert result == payload
+        options = clerk.authenticate_request.call_args.kwargs["options"]
+        assert options.authorized_parties == ["https://app.example.com"]
+
+    def test_empty_allowlist_does_not_reject_a_valid_token(self, settings):
+        """Test the empty-allowlist path against the real SDK verification rule.
+
+        Guards the ``[]`` vs ``None`` distinction: the SDK only skips the azp
+        check when ``authorized_parties is None``. Passing ``[]`` would reject
+        every token.
+        """
+        from clerk_backend_api.security.types import AuthenticateRequestOptions
+
+        from django_clerk_users.authentication.utils import _get_auth_parties
+
+        settings.CLERK_FRONTEND_HOSTS = []
+        settings.CLERK_AUTH_PARTIES = []
+
+        options = AuthenticateRequestOptions(
+            authorized_parties=_get_auth_parties() or None
+        )
+
+        assert options.authorized_parties is None
+
     def test_unsigned_request_state_raises_for_present_bearer_token(self):
         """Test that an invalid bearer token is not treated as anonymous."""
         from django_clerk_users.authentication.utils import (
