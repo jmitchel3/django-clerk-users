@@ -176,11 +176,20 @@ def get_clerk_payload_from_request(request: HttpRequest) -> dict[str, Any] | Non
         return None
 
     try:
-        # Build auth options with authorized parties
-        auth_options = None
-        auth_parties = _get_auth_parties()
-        if auth_parties:
-            auth_options = AuthenticateRequestOptions(authorized_parties=auth_parties)
+        # Build auth options with authorized parties.
+        #
+        # The options object is always constructed: the SDK reads
+        # ``options.secret_key`` unconditionally, so passing ``None`` raises an
+        # AttributeError that the broad ``except`` below would report as a
+        # generic token failure.
+        #
+        # An empty allowlist must be normalized to ``None`` rather than passed
+        # through as ``[]``. The SDK skips the ``azp`` check only when
+        # ``authorized_parties is None``; an empty list is treated as an
+        # allowlist that matches nothing and rejects every token.
+        auth_options = AuthenticateRequestOptions(
+            authorized_parties=_get_auth_parties() or None
+        )
 
         # Validate the token using Clerk SDK
         request_state = clerk.authenticate_request(request, options=auth_options)

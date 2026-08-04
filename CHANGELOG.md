@@ -10,6 +10,13 @@ All notable changes to `django-clerk-users` are documented here.
   page was ever revoked. Listing now walks every page before any revoke runs,
   which also keeps the `status="active"` window from shifting under the offset
   cursor mid-loop. The loop is bounded by `CLERK_SESSION_LIST_MAX_PAGES`.
+- Fixed token verification failing outright when neither `CLERK_FRONTEND_HOSTS`
+  nor `CLERK_AUTH_PARTIES` was set. `options=None` was passed to the Clerk SDK,
+  which reads `options.secret_key` unconditionally, so every request raised an
+  `AttributeError` that surfaced as a generic token validation error. An options
+  object is now always constructed. An empty allowlist is normalized to `None`
+  rather than `[]`, because the SDK skips the `azp` check only for `None` and
+  would treat an empty list as an allowlist matching nothing.
 
 ## 0.3.4 - 2026-08-03
 
