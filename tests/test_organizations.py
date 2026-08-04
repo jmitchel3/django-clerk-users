@@ -3,6 +3,7 @@ Tests for django-clerk-users organizations sub-app.
 """
 
 import uuid
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -145,6 +146,34 @@ class TestOrganizationModel:
         """Test get_member_count method."""
         count = organization.get_member_count()
         assert count == 1
+
+    @pytest.mark.parametrize(
+        ("created", "message"),
+        [
+            (True, "Organization created successfully"),
+            (False, "Organization updated successfully"),
+        ],
+    )
+    def test_sync_from_clerk_reports_create_and_update(
+        self, organization, created, message
+    ):
+        with patch(
+            "django_clerk_users.organizations.webhooks.update_or_create_organization",
+            return_value=(organization, created),
+        ) as update_or_create:
+            result = organization.sync_from_clerk()
+
+        assert result == (True, message)
+        update_or_create.assert_called_once_with(organization.clerk_id)
+
+    def test_sync_from_clerk_reports_failure(self, organization):
+        with patch(
+            "django_clerk_users.organizations.webhooks.update_or_create_organization",
+            side_effect=RuntimeError("Clerk unavailable"),
+        ):
+            result = organization.sync_from_clerk()
+
+        assert result == (False, "Clerk unavailable")
 
 
 class TestOrganizationMemberModel:

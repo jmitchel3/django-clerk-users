@@ -606,6 +606,13 @@ class TestWebhookSecurity:
         with pytest.raises(ClerkWebhookError, match="not configured"):
             verify_clerk_webhook(request, signing_key="not-a-svix-secret")
 
+    def test_non_string_signing_key_is_unconfigured(self):
+        from django_clerk_users.webhooks.security import (
+            _normalize_webhook_signing_key,
+        )
+
+        assert _normalize_webhook_signing_key(object()) is None
+
     @override_settings(CLERK_WEBHOOK_SIGNING_KEY=b"  whsec_replace_me  ")
     def test_verify_webhook_bytes_placeholder_signing_key_is_unconfigured(self):
         """Test byte-string placeholders are normalized before verification."""
@@ -697,6 +704,34 @@ class TestWebhookSecurity:
         assert payload == {"type": "invitation.accepted"}
         mock_webhook.assert_called_once_with("whsec_activation")
 
+    @patch("django_clerk_users.webhooks.security.Webhook")
+    def test_verify_webhook_wraps_signature_failures(self, mock_webhook):
+        from svix.webhooks import WebhookVerificationError
+
+        from django_clerk_users.exceptions import ClerkWebhookError
+        from django_clerk_users.webhooks.security import verify_clerk_webhook
+
+        mock_webhook.return_value.verify.side_effect = WebhookVerificationError(
+            "bad signature"
+        )
+
+        with pytest.raises(ClerkWebhookError, match="verification failed"):
+            verify_clerk_webhook(
+                RequestFactory().post("/"), signing_key="whsec_endpoint"
+            )
+
+    @patch("django_clerk_users.webhooks.security.Webhook")
+    def test_verify_webhook_wraps_unexpected_failures(self, mock_webhook):
+        from django_clerk_users.exceptions import ClerkWebhookError
+        from django_clerk_users.webhooks.security import verify_clerk_webhook
+
+        mock_webhook.return_value.verify.side_effect = RuntimeError("Svix crashed")
+
+        with pytest.raises(ClerkWebhookError, match="verification error"):
+            verify_clerk_webhook(
+                RequestFactory().post("/"), signing_key="whsec_endpoint"
+            )
+
     def test_clerk_webhook_required_rejects_get(self):
         """Test decorator rejects GET requests."""
         from django_clerk_users.webhooks.security import clerk_webhook_required
@@ -719,6 +754,23 @@ class TestWebhookSecurity:
             return HttpResponse("OK")
 
         assert my_webhook_view.__name__ == "my_webhook_view"
+
+    def test_clerk_webhook_required_returns_forbidden_on_verification_error(self):
+        from django_clerk_users.exceptions import ClerkWebhookError
+        from django_clerk_users.webhooks.security import clerk_webhook_required
+
+        @clerk_webhook_required(signing_key="whsec_endpoint")
+        def my_webhook_view(request):
+            return HttpResponse("OK")
+
+        with patch(
+            "django_clerk_users.webhooks.security.verify_clerk_webhook",
+            side_effect=ClerkWebhookError("bad signature"),
+        ):
+            response = my_webhook_view(RequestFactory().post("/"))
+
+        assert response.status_code == 403
+        assert response.content == b"bad signature"
 
     @patch("django_clerk_users.webhooks.security.Webhook")
     def test_clerk_webhook_required_accepts_endpoint_signing_key(self, mock_webhook):

@@ -2,7 +2,10 @@
 Tests for data-preserving schema migrations.
 """
 
+import importlib
 import uuid
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django.db import connection
@@ -30,6 +33,54 @@ def _migrate_to(targets):
 def _migrate_to_latest():
     executor = MigrationExecutor(connection)
     executor.migrate(executor.loader.graph.leaf_nodes())
+
+
+@pytest.mark.parametrize(
+    ("module_name", "function_name", "app_label", "model_name"),
+    [
+        (
+            "django_clerk_users.migrations.0005_remove_clerkuser_django_cler_clerk_i_d591b6_idx_and_more",
+            "deduplicate_clerkuser_uids",
+            "django_clerk_users",
+            "ClerkUser",
+        ),
+        (
+            "django_clerk_users.organizations.migrations.0002_remove_organization_clerk_organ_clerk_i_b2b811_idx_and_more",
+            "deduplicate_organization_uids",
+            "clerk_organizations",
+            "Organization",
+        ),
+    ],
+)
+def test_uid_deduplication_retries_when_generated_uuid_already_exists(
+    module_name, function_name, app_label, model_name
+):
+    """Both migrations retry the vanishingly rare generated-UUID collision."""
+    migration = importlib.import_module(module_name)
+    duplicate_uid = uuid.UUID(int=1)
+    replacement_uid = uuid.UUID(int=2)
+    model = MagicMock()
+    using_manager = model.objects.using.return_value
+    using_manager.order_by.return_value.values_list.return_value.iterator.return_value = [
+        (1, duplicate_uid),
+        (2, duplicate_uid),
+    ]
+    apps = MagicMock()
+    apps.get_model.return_value = model
+    schema_editor = SimpleNamespace(connection=SimpleNamespace(alias="migration_test"))
+
+    with patch.object(
+        migration.uuid,
+        "uuid4",
+        side_effect=[duplicate_uid, replacement_uid],
+    ):
+        getattr(migration, function_name)(apps, schema_editor)
+
+    apps.get_model.assert_called_once_with(app_label, model_name)
+    using_manager.filter.assert_called_once_with(pk=2)
+    using_manager.filter.return_value.update.assert_called_once_with(
+        uid=replacement_uid
+    )
 
 
 @pytest.mark.django_db(transaction=True)

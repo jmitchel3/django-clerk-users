@@ -2,6 +2,7 @@
 Tests for auto-generated username functionality.
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -49,6 +50,25 @@ class TestGenerateUniqueUsername:
             username = User.objects.generate_unique_username()
             assert username not in generated
             generated.add(username)
+
+    def test_generate_unique_username_uses_full_uuid_after_ten_collisions(self, db):
+        """The bounded retry loop falls back without risking an infinite loop."""
+        short = SimpleNamespace(hex="deadbeef000000000000000000000000")
+        fallback = SimpleNamespace(hex="fulluuid000000000000000000000000")
+
+        with (
+            patch(
+                "django_clerk_users.managers.uuid.uuid4",
+                side_effect=[*[short] * 10, fallback],
+            ),
+            patch.object(User.objects, "filter") as user_filter,
+        ):
+            user_filter.return_value.exists.return_value = True
+
+            username = User.objects.generate_unique_username(prefix="member")
+
+        assert username == "member_fulluuid000000000000000000000000"
+        assert user_filter.call_count == 10
 
 
 class TestAutoGenerateUsernameSetting:
@@ -325,6 +345,25 @@ class TestGenerateUsernameForUser:
         user.refresh_from_db()
         assert result is not None
         assert user.username == result
+
+    @patch("django_clerk_users.utils.get_clerk_client")
+    def test_clerk_sync_failure_keeps_generated_local_username(
+        self, mock_get_client, db, caplog
+    ):
+        """A remote sync failure is logged after the local username is durable."""
+        from django_clerk_users.utils import generate_username_for_user
+
+        user = User.objects.create(clerk_id="clerk_sync_error", username=None)
+        mock_get_client.return_value.users.update.side_effect = RuntimeError(
+            "Clerk unavailable"
+        )
+
+        with caplog.at_level("ERROR"):
+            result = generate_username_for_user(user.pk)
+
+        user.refresh_from_db()
+        assert result == user.username
+        assert "Failed to sync username to Clerk" in caplog.text
 
 
 class TestGenerateUsernamesForUsersWithout:

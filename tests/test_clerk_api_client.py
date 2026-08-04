@@ -307,6 +307,27 @@ class TestTransport:
 
         assert seen["body"] == {"email_address": ["a@b.com"]}
 
+    def test_shared_client_is_reused_and_left_open(self):
+        shared = httpx.Client(transport=httpx.MockTransport(json_handler({"ok": True})))
+        try:
+            transport = ClerkTransport(SECRET_KEY, client=shared)
+
+            assert transport.get("/shared").ok is True
+            assert shared.is_closed is False
+        finally:
+            shared.close()
+
+    def test_put_forwards_the_http_method(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            return httpx.Response(200, json={})
+
+        make_transport(handler).put("/users/user_123", json={"first_name": "Ada"})
+
+        assert seen["method"] == "PUT"
+
     def test_none_params_are_dropped(self):
         seen = {}
 
@@ -365,6 +386,15 @@ class TestTransport:
 
         assert excinfo.value.status_code == 502
         assert "bad gateway" in str(excinfo.value)
+
+    def test_empty_error_body_uses_the_base_error_message(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(503)
+
+        with pytest.raises(ClerkAPIError) as excinfo:
+            make_transport(handler).get("/users")
+
+        assert str(excinfo.value).endswith("GET https://api.clerk.com/v1/users")
 
     def test_timeout_is_honoured_from_argument(self):
         seen = {}
