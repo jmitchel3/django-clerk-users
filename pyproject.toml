@@ -8,12 +8,12 @@ name = "django-clerk-users"
 version = "0.3.4"
 description = "Integrate Clerk with Django"
 readme = "README.md"
+keywords = [ "authentication", "clerk", "django", "jwt", "webhooks" ]
 license = "MIT"
-requires-python = ">=3.12"
 authors = [
   { name = "Justin Mitchel" },
 ]
-keywords = [ "authentication", "clerk", "django", "jwt", "webhooks" ]
+requires-python = ">=3.12"
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Framework :: Django",
@@ -24,12 +24,14 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
-  "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
   "clerk-backend-api>=6.0.1",
   "cryptography>=45",
-  "django>=4.2,<7.0",
+  "django>=4.2,<7",
+  # Direct dependency rather than relying on the svix transitive: the thin
+  # Clerk client imports httpx itself, and svix is due to be droppable.
+  "httpx>=0.27",
   "svix>=1",
 ]
 
@@ -38,6 +40,24 @@ urls.Changelog = "https://github.com/jmitchel3/django-clerk-users/blob/main/CHAN
 urls.Documentation = "https://github.com/jmitchel3/django-clerk-users"
 urls.Issues = "https://github.com/jmitchel3/django-clerk-users/issues"
 urls.Repository = "https://github.com/jmitchel3/django-clerk-users"
+
+[dependency-groups]
+dev = [
+  "packaging>=24",
+  "pip>=25.3",
+  "pre-commit>=4.4",
+  "pytest>=9",
+  "pytest-cov>=7",
+  "pytest-django>=4.9",
+  "python-dotenv>=1",
+  "rav>=0.1.1",
+  # Pinned to the 0.14 line: ruff 0.15 widened its default rule set, which
+  # flags ~184 pre-existing findings across src/ and migrations. Widening the
+  # lint surface is its own change, not a dependency bump.
+  "ruff>=0.14.1,<0.15",
+  "tox>=4.32",
+  "tox-uv>=1.29",
+]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -53,24 +73,6 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = [ "src/django_clerk_users" ]
-
-[dependency-groups]
-dev = [
-  "packaging>=24",
-  "pip>=25.3",
-  "pre-commit>=4.4",
-  "pytest>=9",
-  "pytest-cov>=7.0.0",
-  "pytest-django>=4.9",
-  "python-dotenv>=1",
-  "rav>=0.1.1",
-  # Pinned to the 0.14 line: ruff 0.15 widened its default rule set, which
-  # flags ~184 pre-existing findings across src/ and migrations. Widening the
-  # lint surface is its own change, not a dependency bump.
-  "ruff>=0.14.1,<0.15",
-  "tox>=4.32",
-  "tox-uv>=1.29",
-]
 
 [tool.black]
 line-length = 88

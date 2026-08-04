@@ -124,7 +124,12 @@ def _check_wheel(version: str) -> None:
             # Deliberately unbounded so new cryptography releases are usable
             # as soon as clerk-backend-api stops capping them.
             "Requires-Dist: cryptography>=45",
-            "Requires-Dist: django<7.0,>=4.2",
+            # pyproject-fmt normalizes the upper bound to "<7"; it is the same
+            # exclusion as "<7.0" under PEP 440.
+            "Requires-Dist: django<7,>=4.2",
+            # Direct dependency of the thin Clerk client rather than a svix
+            # transitive, so it must be declared in the wheel metadata.
+            "Requires-Dist: httpx>=0.27",
             "Requires-Dist: svix>=1",
             "Provides-Extra: drf",
             "Requires-Dist: djangorestframework>=3.14; extra == 'drf'",

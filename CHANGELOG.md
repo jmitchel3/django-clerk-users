@@ -17,6 +17,17 @@ All notable changes to `django-clerk-users` are documented here.
   object is now always constructed. An empty allowlist is normalized to `None`
   rather than `[]`, because the SDK skips the `azp` check only for `None` and
   would treat an empty list as an allowlist matching nothing.
+- Added `django_clerk_users.clerk_api`, a thin Clerk HTTP client core: a
+  recursive `ClerkObject` response type that is both attribute-accessible and a
+  `Mapping`, and a `ClerkTransport` built on httpx that honours `timeout_ms`.
+  This is the foundation for decoupling from `clerk-backend-api` and is not yet
+  wired into any call site, so no runtime behavior changes.
+- `ClerkAPIError` now carries `status_code` and a structured `data` body, so
+  callers can branch on Clerk error codes (`exc.data.errors[0].code`,
+  `.meta.param_names`) without depending on SDK types. Constructing it with only
+  a message is unchanged.
+- Declared `httpx` as a direct dependency instead of relying on it arriving
+  transitively through `svix`.
 
 ## 0.3.4 - 2026-08-03
 
