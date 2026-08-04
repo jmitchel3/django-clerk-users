@@ -20,8 +20,11 @@ request.
   Node.js 20 to its current Node.js 24 release line.
 - Use `astral-sh/setup-uv@v9.0.0`, an immutable release tag. Setup-uv stopped
   publishing moving major and minor tags in v8.
-- Keep setup-uv caching enabled. The cache restore/save warnings in the sampled
-  run were GitHub service errors, while the current cache inputs remain valid.
+- Keep setup-uv caching enabled, but assign one cache writer to each group of
+  concurrent jobs. Parallel jobs restore the shared cache without racing to
+  reserve and save the same key. Cryptography Watch uses its own suffix so its
+  writer cannot race the CI writer when both workflows run for one pull
+  request.
 
 ## Verification
 
@@ -46,5 +49,5 @@ All four workflows now use current Node.js 24 action releases:
 
 The CI, release, scheduled cryptography watch, and manually dispatched live
 smoke workflows no longer reference the Node.js 20 actions named in GitHub's
-deprecation annotations. No workflow behavior or cache policy was otherwise
-changed.
+deprecation annotations. Cache restores remain enabled without duplicate
+writers producing reservation warnings.
