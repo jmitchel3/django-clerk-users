@@ -53,6 +53,10 @@ repos:
   rev: 1.19.1
   hooks:
   - id: blacken-docs
+    # Kanbanlan request records quote external issue text verbatim, including
+    # partial snippets that are not parseable Python. They are an archive, not
+    # documentation, so they must not be reformatted.
+    exclude: ^docs/kanbanlan/
     additional_dependencies:
     - black==23.1.0
 - repo: https://github.com/astral-sh/ruff-pre-commit

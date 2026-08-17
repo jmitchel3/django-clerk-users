@@ -181,7 +181,13 @@ Confirmed in 0.1.3 and 0.4.0.
   31 passed, confirming the DRF entry point returns a user rather than
   propagating the backend error.
 - `uv run ruff check .` and `uv run ruff format --check .` pass.
-- `uv run tox` across Python 3.12, 3.13, 3.14 and the supported Django versions.
+- `uv run tox`: all 12 environments OK across Python 3.12, 3.13, and 3.14 with
+  Django 4.2, 5.2, and 6.0, plus the `drf`, `sdk`, and `cryptolatest`
+  environments. Combined coverage across all of them is 100%.
+- `uv run pre-commit run --files <changed files>`: all hooks pass. Note that
+  `pre-commit run --all-files` also rewrites `authentication/drf.py`
+  (django-upgrade) and `py.typed` (whitespace); both are pre-existing on `main`,
+  unrelated to this request, and were reverted rather than folded in.
 - New `tests/test_cache_failures.py` drives a raising cache through every
   affected entry point: `get_clerk_payload_from_request` (read and write),
   `ClerkAuthentication.authenticate`, `ClerkOrganizationMiddleware`,
