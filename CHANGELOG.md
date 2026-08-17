@@ -2,7 +2,7 @@
 
 All notable changes to `django-clerk-users` are documented here.
 
-## Unreleased
+## 0.4.1 - 2026-08-17
 
 ### Fixed
 
