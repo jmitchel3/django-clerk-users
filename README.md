@@ -462,7 +462,9 @@ classic Django users and `created_at` for `ClerkUser`-based source models.
   package registers checks for placeholder secrets, missing frontend host
   allowlists, and middleware ordering.
 - Configure application logging for `django_clerk_users.*` so authentication,
-  webhook, and sync failures are visible in production.
+  webhook, and sync failures are visible in production. Alert on
+  `django_clerk_users.caching` warnings: the package rides out a cache outage,
+  but it does so by sending more traffic to Clerk and your database.
 - Run `python manage.py migrate` during deploys and run sync commands with
   `--dry-run` before backfilling existing Clerk data.
 - Keep the package's CI gates enabled: lockfile checks, Ruff, formatting,
@@ -594,6 +596,31 @@ Existing projects can also use the legacy opt-out flag:
 ```python
 CLERK_DISABLE_PASSWORD_SYNC = True
 ```
+
+## Caching
+
+The package caches verified JWT payloads, users, and organizations in Django's
+default cache. Every one of those caches sits in front of an authoritative
+source (Clerk or your database), so the cache is an optimization and never a
+source of truth.
+
+A cache backend failure is therefore treated as a cache miss, not as an error.
+If your Redis instance is unreachable, rate-limited, or timing out, requests
+keep authenticating; they simply re-verify tokens with Clerk and re-query the
+database until the cache recovers. Failures are logged to the
+`django_clerk_users.caching` logger:
+
+- `WARNING` for a failed read, write, or dedup check.
+- `ERROR` for a failed invalidation, because the stale entry is then served
+  until it expires on its own (bounded by `CLERK_CACHE_TIMEOUT` and
+  `CLERK_ORG_CACHE_TIMEOUT`).
+
+Tracebacks are attached only when that logger is set to `DEBUG`, so a cache
+outage does not flood your logs with one traceback per request.
+
+Because a forced miss only ever means "ask the authoritative source again",
+this can never cause the package to accept a token or a user it would
+otherwise reject.
 
 ## Configuration Reference
 

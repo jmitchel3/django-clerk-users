@@ -2,6 +2,33 @@
 
 All notable changes to `django-clerk-users` are documented here.
 
+## Unreleased
+
+### Fixed
+
+- **A cache backend failure no longer takes authentication down.**
+  ([#32](https://github.com/jmitchel3/django-clerk-users/issues/32)) Every
+  cache read, write, delete, and add now degrades to a cache miss instead of
+  propagating out of the request. Previously an unreachable, rate-limited, or
+  timing-out cache produced:
+  - **HTTP 500 on every request carrying a bearer token**, from the unguarded
+    payload cache read in `get_clerk_payload_from_request`, on both the DRF
+    path and `ClerkAuthMiddleware` (including its periodic session
+    revalidation). Requests without a token returned a healthy-looking 401,
+    which made the cache the last place anyone looked.
+  - **HTTP 500 on every request for org-scoped apps**, from the unguarded
+    organization cache read reached by `ClerkOrganizationMiddleware`.
+  - **A spurious 401 on a token that verified successfully**, because a failed
+    cache write was converted into a `ClerkTokenError`.
+  - **HTTP 500 on the webhook endpoint**, from the unguarded deduplication
+    check. An outage now treats the event as new and processes it; the
+    handlers are idempotent.
+
+  Failed invalidations log at `ERROR` rather than `WARNING`, since the stale
+  entry survives until it expires. Tracebacks are attached only when the
+  `django_clerk_users.caching` logger is at `DEBUG`, so an outage does not
+  flood the logs. Affected 0.1.3 through 0.4.0.
+
 ## 0.4.0 - 2026-08-04
 
 ### Security and hardening
