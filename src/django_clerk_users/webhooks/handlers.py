@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
-from django.core.cache import cache
 from django.db import transaction
 
+from django_clerk_users.caching import safe_cache_add
 from django_clerk_users.webhooks.signals import (
     clerk_session_created,
     clerk_session_ended,
@@ -108,7 +108,10 @@ def is_duplicate_webhook(event_type: str, instance_id: str) -> bool:
     """
     cache_key = f"webhook:{event_type}:{instance_id}"
     timeout = _get_webhook_dedup_timeout()
-    return not cache.add(cache_key, True, timeout=timeout)
+    # A cache outage means the event is treated as new and processed again.
+    # The handlers below are idempotent (update_or_create), so reprocessing is
+    # cheap; dropping the event because dedup is unavailable would not be.
+    return not safe_cache_add(cache_key, True, timeout=timeout)
 
 
 @transaction.atomic

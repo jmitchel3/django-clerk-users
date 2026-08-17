@@ -131,7 +131,7 @@ class TestDuplicateWebhook:
     def test_duplicate_check_uses_atomic_cache_add(self):
         """Test duplicate detection relies on cache.add atomicity."""
         with patch(
-            "django_clerk_users.webhooks.handlers.cache.add", return_value=False
+            "django_clerk_users.webhooks.handlers.safe_cache_add", return_value=False
         ) as add:
             result = is_duplicate_webhook("user.created", "inst_atomic")
 
@@ -146,7 +146,7 @@ class TestDuplicateWebhook:
     def test_invalid_dedup_timeout_falls_back_to_default(self):
         """Test invalid dedup timeout settings do not break webhook handling."""
         with patch(
-            "django_clerk_users.webhooks.handlers.cache.add", return_value=True
+            "django_clerk_users.webhooks.handlers.safe_cache_add", return_value=True
         ) as add:
             result = is_duplicate_webhook("user.created", "inst_invalid_timeout")
 
@@ -161,7 +161,7 @@ class TestDuplicateWebhook:
     def test_non_positive_dedup_timeout_falls_back_to_default(self):
         """Test non-positive dedup timeouts do not disable duplicate protection."""
         with patch(
-            "django_clerk_users.webhooks.handlers.cache.add", return_value=True
+            "django_clerk_users.webhooks.handlers.safe_cache_add", return_value=True
         ) as add:
             result = is_duplicate_webhook("user.created", "inst_zero_timeout")
 

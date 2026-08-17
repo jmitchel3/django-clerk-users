@@ -206,7 +206,9 @@ class TestClerkPayloadFromRequest:
                 "django_clerk_users.authentication.utils.authenticate_session_token",
                 return_value=request_state,
             ),
-            patch("django_clerk_users.authentication.utils.cache.set") as cache_set,
+            patch(
+                "django_clerk_users.authentication.utils.safe_cache_set"
+            ) as cache_set,
         ):
             result = get_clerk_payload_from_request(request)
 
@@ -236,7 +238,9 @@ class TestClerkPayloadFromRequest:
                 "django_clerk_users.authentication.utils.authenticate_session_token",
                 return_value=request_state,
             ),
-            patch("django_clerk_users.authentication.utils.cache.set") as cache_set,
+            patch(
+                "django_clerk_users.authentication.utils.safe_cache_set"
+            ) as cache_set,
         ):
             result = get_clerk_payload_from_request(request)
 
@@ -266,7 +270,9 @@ class TestClerkPayloadFromRequest:
                 "django_clerk_users.authentication.utils.authenticate_session_token",
                 return_value=request_state,
             ),
-            patch("django_clerk_users.authentication.utils.cache.set") as cache_set,
+            patch(
+                "django_clerk_users.authentication.utils.safe_cache_set"
+            ) as cache_set,
         ):
             result = get_clerk_payload_from_request(request)
 
@@ -420,7 +426,7 @@ class TestClerkPayloadFromRequest:
 
         with (
             patch(
-                "django_clerk_users.authentication.utils.cache.get",
+                "django_clerk_users.authentication.utils.safe_cache_get",
                 return_value=payload,
             ),
             patch(
@@ -441,7 +447,7 @@ class TestClerkPayloadFromRequest:
         request = RequestFactory().get("/", HTTP_AUTHORIZATION="Bearer token")
 
         with patch(
-            "django_clerk_users.authentication.utils.cache.get", return_value=None
+            "django_clerk_users.authentication.utils.safe_cache_get", return_value=None
         ):
             assert get_clerk_payload_from_request(request) is None
 
@@ -464,7 +470,8 @@ class TestClerkPayloadFromRequest:
 
         with (
             patch(
-                "django_clerk_users.authentication.utils.cache.get", return_value=None
+                "django_clerk_users.authentication.utils.safe_cache_get",
+                return_value=None,
             ),
             patch(
                 "django_clerk_users.authentication.utils.authenticate_session_token",
@@ -485,7 +492,8 @@ class TestClerkPayloadFromRequest:
 
         with (
             patch(
-                "django_clerk_users.authentication.utils.cache.get", return_value=None
+                "django_clerk_users.authentication.utils.safe_cache_get",
+                return_value=None,
             ),
             patch(
                 "django_clerk_users.authentication.utils.authenticate_session_token",
@@ -505,7 +513,8 @@ class TestClerkPayloadFromRequest:
 
         with (
             patch(
-                "django_clerk_users.authentication.utils.cache.get", return_value=None
+                "django_clerk_users.authentication.utils.safe_cache_get",
+                return_value=None,
             ),
             patch(
                 "django_clerk_users.authentication.utils.authenticate_session_token",

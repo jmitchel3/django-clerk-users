@@ -23,6 +23,98 @@ DEFAULT_CLERK_CACHE_TIMEOUT = 300
 DEFAULT_CLERK_ORG_CACHE_TIMEOUT = 900
 
 
+def _log_cache_failure(message: str, key: str, exc: Exception) -> None:
+    """
+    Report a cache backend failure without flooding the logs.
+
+    A cache outage hits every request, so the traceback is attached only when
+    DEBUG logging is on. The warning line still names the key and the cause,
+    which is enough to tell a cache outage apart from an auth misconfiguration.
+    """
+    logger.warning(
+        message,
+        key,
+        exc,
+        exc_info=logger.isEnabledFor(logging.DEBUG),
+    )
+
+
+def safe_cache_get(key: str, default=None):
+    """
+    Read from the cache, treating a backend failure as a cache miss.
+
+    Every cache in this package sits in front of an authoritative source
+    (Clerk or the database), so a forced miss only costs a re-verification or
+    a re-query. It can never make the caller accept something it would
+    otherwise reject, which is why failing open is safe here.
+    """
+    try:
+        return cache.get(key, default)
+    except Exception as exc:
+        _log_cache_failure(
+            "Clerk cache read failed for %s (%s); treating as a cache miss", key, exc
+        )
+        return default
+
+
+def safe_cache_set(key: str, value, timeout: int | None = None) -> bool:
+    """
+    Write to the cache, ignoring a backend failure.
+
+    Returns True when the value was stored. Failing to cache must never deny a
+    request that already succeeded, so callers continue uncached instead of
+    raising.
+    """
+    try:
+        cache.set(key, value, timeout=timeout)
+        return True
+    except Exception as exc:
+        _log_cache_failure(
+            "Clerk cache write failed for %s (%s); continuing uncached", key, exc
+        )
+        return False
+
+
+def safe_cache_delete(key: str) -> bool:
+    """
+    Delete a cache key, ignoring a backend failure.
+
+    Returns True when the key was removed. This is the one fail-open case that
+    is not free: a swallowed failure means the stale entry is served until it
+    expires on its own, so it logs at error rather than warning.
+    """
+    try:
+        cache.delete(key)
+        return True
+    except Exception as exc:
+        logger.error(
+            "Clerk cache invalidation failed for %s (%s); "
+            "stale data may be served until the entry expires",
+            key,
+            exc,
+            exc_info=logger.isEnabledFor(logging.DEBUG),
+        )
+        return False
+
+
+def safe_cache_add(key: str, value, timeout: int | None = None, default=True) -> bool:
+    """
+    Add a cache key if absent, returning ``default`` on a backend failure.
+
+    ``cache.add`` returns True when the key was absent and has now been set.
+    Callers use that to claim work exactly once, so ``default`` is what the
+    caller wants a cache outage to mean; it defaults to True so the work runs
+    rather than being silently dropped.
+    """
+    try:
+        return bool(cache.add(key, value, timeout=timeout))
+    except Exception as exc:
+        _log_cache_failure(
+            "Clerk cache add failed for %s (%s); assuming the key was absent", key, exc
+        )
+        return default
+
+
 def _get_timeout(setting_name: str, default: int) -> int:
     raw_timeout = getattr(settings, setting_name, default)
     try:
@@ -72,7 +164,7 @@ def get_cached_user(clerk_id: str, query_db: bool = True) -> AbstractClerkUser |
         return None
 
     cache_key = get_user_cache_key(clerk_id)
-    cached_user = cache.get(cache_key)
+    cached_user = safe_cache_get(cache_key)
 
     if cached_user is not None:
         # Cache hit - could be a User instance or False (cached "not found")
@@ -86,11 +178,11 @@ def get_cached_user(clerk_id: str, query_db: bool = True) -> AbstractClerkUser |
     try:
         user = User.objects.get(clerk_id=clerk_id, is_active=True)
         # Cache the user instance
-        cache.set(cache_key, user, timeout=_get_user_cache_timeout())
+        safe_cache_set(cache_key, user, timeout=_get_user_cache_timeout())
         return user
     except User.DoesNotExist:
         # Cache the "not found" result to prevent repeated DB queries
-        cache.set(cache_key, False, timeout=_get_user_cache_timeout())
+        safe_cache_set(cache_key, False, timeout=_get_user_cache_timeout())
         return None
 
 
@@ -105,7 +197,7 @@ def set_cached_user(clerk_id: str, user: AbstractClerkUser | None) -> None:
     cache_key = get_user_cache_key(clerk_id)
     # Cache False for "not found" to distinguish from "not cached"
     value = user if user is not None else False
-    cache.set(cache_key, value, timeout=_get_user_cache_timeout())
+    safe_cache_set(cache_key, value, timeout=_get_user_cache_timeout())
 
 
 def invalidate_clerk_user_cache(clerk_id: str) -> None:
@@ -116,7 +208,7 @@ def invalidate_clerk_user_cache(clerk_id: str) -> None:
         clerk_id: The Clerk user ID.
     """
     cache_key = get_user_cache_key(clerk_id)
-    cache.delete(cache_key)
+    safe_cache_delete(cache_key)
     logger.debug(f"Invalidated user cache: {clerk_id}")
 
 
@@ -135,7 +227,7 @@ def get_cached_organization(clerk_id: str, query_db: bool = True):
         return None
 
     cache_key = get_org_cache_key(clerk_id)
-    cached_org = cache.get(cache_key)
+    cached_org = safe_cache_get(cache_key)
 
     if cached_org is not None:
         # Cache hit - could be an Organization instance or False (cached "not found")
@@ -150,11 +242,11 @@ def get_cached_organization(clerk_id: str, query_db: bool = True):
     try:
         org = Organization.objects.get(clerk_id=clerk_id, is_active=True)
         # Cache the organization instance
-        cache.set(cache_key, org, timeout=_get_org_cache_timeout())
+        safe_cache_set(cache_key, org, timeout=_get_org_cache_timeout())
         return org
     except Organization.DoesNotExist:
         # Cache the "not found" result to prevent repeated DB queries
-        cache.set(cache_key, False, timeout=_get_org_cache_timeout())
+        safe_cache_set(cache_key, False, timeout=_get_org_cache_timeout())
         return None
 
 
@@ -169,7 +261,7 @@ def set_cached_organization(clerk_id: str, organization) -> None:
     cache_key = get_org_cache_key(clerk_id)
     # Cache False for "not found" to distinguish from "not cached"
     value = organization if organization is not None else False
-    cache.set(cache_key, value, timeout=_get_org_cache_timeout())
+    safe_cache_set(cache_key, value, timeout=_get_org_cache_timeout())
 
 
 def invalidate_organization_cache(clerk_id: str) -> None:
@@ -180,5 +272,5 @@ def invalidate_organization_cache(clerk_id: str) -> None:
         clerk_id: The Clerk organization ID.
     """
     cache_key = get_org_cache_key(clerk_id)
-    cache.delete(cache_key)
+    safe_cache_delete(cache_key)
     logger.debug(f"Invalidated organization cache: {clerk_id}")

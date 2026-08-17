@@ -10,8 +10,8 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
-from django.core.cache import cache
 
+from django_clerk_users.caching import safe_cache_get, safe_cache_set
 from django_clerk_users.client import (
     get_configured_clerk_secret_key,
 )
@@ -179,8 +179,9 @@ def get_clerk_payload_from_request(request: HttpRequest) -> dict[str, Any] | Non
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     cache_key = f"clerk:payload:{token_hash}"
 
-    # Check cache first
-    cached_payload = cache.get(cache_key)
+    # Check cache first. A cache outage degrades to a miss (re-verifying the
+    # token with Clerk) rather than taking authentication down with it.
+    cached_payload = safe_cache_get(cache_key)
     if cached_payload is not None:
         return cached_payload
 
@@ -218,8 +219,11 @@ def get_clerk_payload_from_request(request: HttpRequest) -> dict[str, Any] | Non
         # Calculate cache timeout based on token expiration
         # This ensures we never use an expired token from cache
         cache_timeout = _payload_cache_timeout(payload)
-        if cache_timeout > 0:
-            cache.set(cache_key, payload, timeout=cache_timeout)
+        # A failed write must not reach the handler below, which would turn a
+        # token that verified successfully into a ClerkTokenError (a 401).
+        if cache_timeout > 0 and safe_cache_set(
+            cache_key, payload, timeout=cache_timeout
+        ):
             logger.debug("Cached Clerk payload for %s seconds", cache_timeout)
 
         return payload
