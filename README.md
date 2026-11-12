@@ -200,6 +200,14 @@ urlpatterns = [
 
 Then configure your Clerk Dashboard to send webhooks to `https://your-app.com/webhooks/clerk/`.
 
+Session webhooks only move `last_login` and `last_logout` forward. Each update
+is a conditional database write, so delayed, replayed, or concurrent deliveries
+cannot regress a stored timestamp, and a missing or malformed timestamp leaves
+the stored value alone. `clerk_session_created` and `clerk_session_ended` are
+still sent for every event for a known user (so revocation receivers keep
+working); the `activity_advanced` keyword is `False` for events that did not
+move the timestamp forward.
+
 For additional Clerk webhook endpoints, each endpoint gets its own Svix signing
 secret. Use the package verifier with an endpoint-specific setting:
 

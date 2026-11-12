@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone as django_timezone
 
 from django_clerk_users.caching import safe_cache_add
 from django_clerk_users.webhooks.signals import (
@@ -75,9 +77,13 @@ def parse_clerk_timestamp(timestamp: int | str | datetime | None) -> datetime | 
             return timestamp.replace(tzinfo=timezone.utc)
         return timestamp
 
-    if isinstance(timestamp, int):
+    if isinstance(timestamp, int) and not isinstance(timestamp, bool):
         # Unix milliseconds
-        return datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+        try:
+            return datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            logger.warning(f"Failed to parse timestamp: {timestamp}")
+            return None
 
     if isinstance(timestamp, str):
         # ISO format string
@@ -245,12 +251,42 @@ def handle_user_deleted(data: dict[str, Any]) -> AbstractClerkUser | None:
         return None
 
 
+def _advance_activity_timestamp(
+    user: AbstractClerkUser, field: str, value: datetime | None
+) -> bool:
+    """
+    Move ``user.<field>`` forward to ``value`` without ever moving it backward.
+
+    The update is a single conditional ``UPDATE ... WHERE field IS NULL OR
+    field < value``, so concurrent deliveries cannot regress the stored value
+    through a read/modify/write race. A missing or unparseable ``value`` never
+    touches the row. ``user`` is refreshed with the stored value afterwards.
+
+    Returns:
+        True if the stored timestamp advanced, False otherwise.
+    """
+    if value is None:
+        return False
+
+    manager = type(user)._default_manager
+    advanced = bool(
+        manager.filter(pk=user.pk)
+        .filter(Q(**{f"{field}__isnull": True}) | Q(**{f"{field}__lt": value}))
+        .update(**{field: value, "updated_at": django_timezone.now()})
+    )
+    user.refresh_from_db(fields=[field, "updated_at"])
+    return advanced
+
+
 @transaction.atomic
 def handle_session_created(data: dict[str, Any]) -> bool:
     """
     Handle session.created webhook event.
 
-    Updates the user's last_login timestamp.
+    Advances the user's last_login timestamp to the event's ``created_at``.
+    Older, duplicate, missing, or malformed timestamps leave the stored value
+    unchanged. ``clerk_session_created`` is still sent for every event for a
+    known user; receivers get ``activity_advanced`` to tell stale events apart.
 
     Args:
         data: The webhook event data.
@@ -270,15 +306,15 @@ def handle_session_created(data: dict[str, Any]) -> bool:
             logger.debug(f"User not found for session.created: {user_id}")
             return True
 
-        # Update last_login
-        user.last_login = parse_clerk_timestamp(data.get("created_at"))
-        user.save(update_fields=["last_login", "updated_at"])
+        activity_advanced = _advance_activity_timestamp(
+            user, "last_login", parse_clerk_timestamp(data.get("created_at"))
+        )
 
-        # Emit signal
         clerk_session_created.send(
             sender=user.__class__,
             user=user,
             clerk_data=data,
+            activity_advanced=activity_advanced,
         )
 
         return True
@@ -293,7 +329,11 @@ def handle_session_ended(data: dict[str, Any]) -> bool:
     """
     Handle session.ended/removed/revoked webhook events.
 
-    Updates the user's last_logout timestamp.
+    Advances the user's last_logout timestamp to the event's ``abandoned_at``
+    (or ``updated_at``). Older, duplicate, missing, or malformed timestamps
+    leave the stored value unchanged. ``clerk_session_ended`` is still sent for
+    every event for a known user, so revocation receivers keep working;
+    ``activity_advanced`` tells stale events apart.
 
     Args:
         data: The webhook event data.
@@ -313,17 +353,17 @@ def handle_session_ended(data: dict[str, Any]) -> bool:
             logger.debug(f"User not found for session.ended: {user_id}")
             return True
 
-        # Update last_logout
-        user.last_logout = parse_clerk_timestamp(
-            data.get("abandoned_at") or data.get("updated_at")
+        activity_advanced = _advance_activity_timestamp(
+            user,
+            "last_logout",
+            parse_clerk_timestamp(data.get("abandoned_at") or data.get("updated_at")),
         )
-        user.save(update_fields=["last_logout", "updated_at"])
 
-        # Emit signal
         clerk_session_ended.send(
             sender=user.__class__,
             user=user,
             clerk_data=data,
+            activity_advanced=activity_advanced,
         )
 
         return True
