@@ -7,6 +7,7 @@ Uses Svix for webhook signature verification.
 from __future__ import annotations
 
 import functools
+import json
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -105,10 +106,17 @@ def verify_clerk_webhook(
             "svix-signature": request.headers.get("svix-signature", ""),
         }
 
-        # Verify and parse the payload
+        # svix 1.x returns the parsed payload; svix 2.x returns None and only
+        # raises on a bad signature. Parse the verified body ourselves then.
         payload = wh.verify(request.body, headers)
+        if payload is None:
+            payload = json.loads(request.body)
+        if not isinstance(payload, dict):
+            raise ClerkWebhookError("Webhook payload must be a JSON object")
         return payload
 
+    except ClerkWebhookError:
+        raise
     except WebhookVerificationError as e:
         logger.warning(f"Webhook verification failed: {e}")
         raise ClerkWebhookError(f"Webhook verification failed: {e}") from e
