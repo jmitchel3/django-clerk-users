@@ -133,7 +133,7 @@ def _check_wheel(version: str) -> None:
             # Session token verification uses PyJWT directly rather than
             # reaching it through the clerk-backend-api transitive.
             "Requires-Dist: pyjwt>=2.8",
-            "Requires-Dist: svix>=1",
+            "Requires-Dist: svix>=2",
             "Provides-Extra: drf",
             "Requires-Dist: djangorestframework>=3.14; extra == 'drf'",
             # The SDK must be reachable only through the extra. If it ever
