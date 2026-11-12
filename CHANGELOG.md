@@ -2,6 +2,43 @@
 
 All notable changes to `django-clerk-users` are documented here.
 
+## 0.5.0 - 2026-11-12
+
+### Changed
+
+- **Requires svix 2.x.** `svix>=2` (locked to 2.10.0). svix 2 changed
+  `Webhook.verify()` to return `None`; the package now parses the verified
+  body itself (see Fixed).
+
+### Fixed
+
+- **Webhook verification returned `None` on fresh installs.**
+  ([#38](https://github.com/jmitchel3/django-clerk-users/issues/38)) With svix
+  2.x resolved by `svix>=1`, `verify_clerk_webhook` handed every verified
+  webhook a `None` payload. Signatures are still verified by svix; the payload
+  is parsed from the verified body. Non-object JSON payloads now raise
+  `ClerkWebhookError`. Affected 0.4.1 and earlier on any install that resolved
+  svix 2.x.
+- **Session activity timestamps never move backward.**
+  ([#36](https://github.com/jmitchel3/django-clerk-users/issues/36))
+  `last_login` and `last_logout` advance through a single conditional
+  `UPDATE`, so delayed, replayed, concurrent, missing, or malformed session
+  webhooks cannot regress or erase them. `clerk_session_created` and
+  `clerk_session_ended` still fire for every event for a known user, with a new
+  `activity_advanced` keyword that is `False` for stale events. These field
+  updates no longer send `post_save` for the user.
+- `parse_clerk_timestamp` returns `None` for booleans and out-of-range
+  millisecond values instead of raising.
+
+### Documentation
+
+- [Hybrid Clerk bearer and Django session recipe](docs/recipes/hybrid-auth.md)
+  for DRF, with CSRF-enforcing and strict-precedence authenticators, tested
+  under real DRF ([#34](https://github.com/jmitchel3/django-clerk-users/issues/34)).
+- [Upgrading with a vendored migration chain](docs/recipes/vendored-migrations.md),
+  with a reproducible PostgreSQL scenario in CI
+  ([#35](https://github.com/jmitchel3/django-clerk-users/issues/35)).
+
 ## 0.4.1 - 2026-08-17
 
 ### Fixed
