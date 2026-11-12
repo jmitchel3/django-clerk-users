@@ -290,7 +290,11 @@ REST_FRAMEWORK = {
 
 `ClerkSessionAuthentication` checks `Authorization: Bearer ...` with Clerk first.
 Requests without a bearer token fall back to Django session authentication.
-Bearer token failures are not hidden by the session fallback.
+Bearer token failures are not hidden by the session fallback. Its session
+fallback is CSRF exempt; see the
+[hybrid authentication recipe](docs/recipes/hybrid-auth.md) for a tested
+variant that keeps CSRF checks and an optional strict policy where any supplied
+`Authorization` header is authoritative.
 
 ### Server-side Clerk operations
 

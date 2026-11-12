@@ -159,7 +159,7 @@ commands_pre =
     cryptolatest: uv pip install --python {envpython} --no-deps --upgrade cryptography
 commands =
     !drf: coverage run --data-file=.coverage.{envname} -m pytest -o pythonpath= {posargs}
-    drf: coverage run --data-file=.coverage.{envname} -m pytest -o pythonpath= tests/test_drf.py tests/test_drf_combined.py {posargs}
+    drf: coverage run --data-file=.coverage.{envname} -m pytest -o pythonpath= tests/test_drf.py tests/test_drf_combined.py tests/test_drf_hybrid_recipe.py {posargs}
     !drf: coverage report --data-file=.coverage.{envname} --include="src/django_clerk_users/*"
     drf: coverage report --data-file=.coverage.{envname} --include="src/django_clerk_users/*" --fail-under=0
 """
