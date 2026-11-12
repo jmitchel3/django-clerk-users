@@ -23,8 +23,11 @@ clerk_user_updated = Signal()  # Provides: user, clerk_data
 clerk_user_deleted = Signal()  # Provides: user, clerk_data
 
 # Session signals
-clerk_session_created = Signal()  # Provides: user, clerk_data
-clerk_session_ended = Signal()  # Provides: user, clerk_data
+# Sent for every session event for a known user, including stale or replayed
+# ones. ``activity_advanced`` is True only when the event moved the user's
+# last_login / last_logout forward.
+clerk_session_created = Signal()  # Provides: user, clerk_data, activity_advanced
+clerk_session_ended = Signal()  # Provides: user, clerk_data, activity_advanced
 
 # Organization signals (used by organizations sub-app)
 clerk_organization_created = Signal()  # Provides: organization, clerk_data
