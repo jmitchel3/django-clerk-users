@@ -9,6 +9,7 @@ on:
     - 'src/**'
     - 'tests/**'
     - 'scripts/**'
+    - 'docs/recipes/**'
     - '.env.example'
     - 'CHANGELOG.md'
     - 'LICENSE'
@@ -24,6 +25,7 @@ on:
     - 'src/**'
     - 'tests/**'
     - 'scripts/**'
+    - 'docs/recipes/**'
     - '.env.example'
     - 'CHANGELOG.md'
     - 'LICENSE'
@@ -220,6 +222,50 @@ jobs:
     - name: Run cryptolatest against a base install
       timeout-minutes: 10
       run: uv run tox -e py313-cryptolatest
+
+  postgres-upgrade:
+    name: PostgreSQL vendored-migration upgrade
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+        - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.13'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v9.0.0
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+        save-cache: false
+
+    - name: Install dependencies
+      timeout-minutes: 5
+      run: |
+        uv sync --group dev --frozen
+        uv pip install "psycopg[binary]>=3.2"
+
+    - name: Run the upgrade scenario
+      timeout-minutes: 10
+      env:
+        DJANGO_CLERK_USERS_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      run: uv run --no-sync python -m pytest -q -rs tests/test_vendored_migration_upgrade.py
 
   coverage:
     name: Coverage
