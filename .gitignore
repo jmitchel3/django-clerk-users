@@ -183,3 +183,7 @@ issues.md
 # Test artifacts
 tests/ui_*.py
 tests/*.sqlite3
+
+# Local Kanbanlan coordination state
+/.cache/kanbanlan/
+/.worktrees/

@@ -2,6 +2,14 @@
 
 All notable changes to `django-clerk-users` are documented here.
 
+## Unreleased
+
+### Documentation
+
+- Version the shared Kanbanlan configuration, agent coordination instructions,
+  and GitHub request templates so new checkouts use the repository's workflow.
+  Align release guidance with the reviewed pull request and tag-based process.
+
 ## 0.5.1 - 2026-11-13
 
 ### Fixed
