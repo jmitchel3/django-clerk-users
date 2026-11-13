@@ -101,16 +101,48 @@ CLERK_CACHE_TIMEOUT = 300  # 5 minutes
 
 ## Releasing
 
-Releases are automated via GitHub Actions (`.github/workflows/main.yaml`).
+Releases are automated via GitHub Actions (`.github/workflows/release.yaml`).
 
 To release a new version:
 
-1. Update version in `pyproject.toml`
-2. Commit changes: `git commit -am "Release vX.Y.Z"`
-3. Push to main: `git push origin main`
-4. Create and push a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
+1. Claim a release request and use its dedicated branch and worktree.
+2. Update `pyproject.toml`, refresh `uv.lock`, and add dated release notes to
+   `CHANGELOG.md`. Record validation in the request's durable record.
+3. Open a pull request to `main`, wait for its checks, and merge it.
+4. Verify CI and the `Live Clerk Smoke` workflow on the resulting main commit.
+5. Create an annotated `vX.Y.Z` tag on that verified commit and push the tag.
+6. Verify the release workflow succeeds and PyPI serves the expected artifacts.
 
 The workflow will:
 - Run tests on Python 3.12, 3.13, 3.14
 - Build the package
 - Publish to PyPI (using trusted publishing)
+
+<!-- kanbanlan:start -->
+## Request Coordination Workflow
+
+The canonical kanban home is `github`. GitHub Issues currently
+store canonical requests, and [jmitchel3 Project
+13](https://github.com/users/jmitchel3/projects/13) is their projection. Repository policy
+and durable delivery records remain versioned here. Follow
+`docs/workflow/kanbanlan.md`.
+
+- At session start run `kanbanlan ensure`. Before mutations run
+  `kanbanlan reconcile` and inspect all open cards and pull requests for
+  semantic overlap. If live coordination state is unavailable, do not start
+  potentially overlapping implementation.
+- Status questions are read-only. “Remember this” creates an Inbox card.
+  “Let's work on this” authorizes a live overlap check and one claim.
+- Create or reuse one request per independently reviewable outcome. Each request
+  has a provider-independent Kanbanlan ID. One session
+  may own exactly one `status:in-progress` card, and one card may have exactly
+  one active session. Claim with
+  `kanbanlan claim <kanbanlan-id-or-provider-ref> --touchpoints ...`.
+- Use a dedicated request branch and worktree. Block semantic conflicts even when
+  filenames differ. Do not expand a claimed card into another useful outcome.
+- Run `kanbanlan record <kanbanlan-id-or-provider-ref>` in the implementation
+  worktree and complete its durable decisions, verification, and delivered result.
+- A pull request closes its issue and moves it to In review. Ownership lasts
+  until merge, explicit release, or handoff. Project Done means delivered to
+  `main`; production readiness still requires staging review.
+<!-- kanbanlan:end -->
