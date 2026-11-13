@@ -59,10 +59,11 @@ TEMPLATES = [
 ]
 
 DATABASES = {
-    "default": {
+    alias: {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": ":memory:",
     }
+    for alias in ("default", "activity_primary", "activity_replica")
 }
 
 # Use the ClerkUser model for testing

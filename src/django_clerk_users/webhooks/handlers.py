@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
-from django.db import transaction
+from django.db import router, transaction
 from django.db.models import Q
 from django.utils import timezone as django_timezone
 
@@ -260,7 +260,9 @@ def _advance_activity_timestamp(
     The update is a single conditional ``UPDATE ... WHERE field IS NULL OR
     field < value``, so concurrent deliveries cannot regress the stored value
     through a read/modify/write race. A missing or unparseable ``value`` never
-    touches the row. ``user`` is refreshed with the stored value afterwards.
+    touches the row. Instance-aware write routing selects the database, and
+    ``user`` is refreshed there afterwards so a stale replica cannot hide the
+    stored value from signal receivers.
 
     Returns:
         True if the stored timestamp advanced, False otherwise.
@@ -268,13 +270,14 @@ def _advance_activity_timestamp(
     if value is None:
         return False
 
-    manager = type(user)._default_manager
+    write_db = router.db_for_write(type(user), instance=user)
+    manager = type(user)._default_manager.using(write_db)
     advanced = bool(
         manager.filter(pk=user.pk)
         .filter(Q(**{f"{field}__isnull": True}) | Q(**{f"{field}__lt": value}))
         .update(**{field: value, "updated_at": django_timezone.now()})
     )
-    user.refresh_from_db(fields=[field, "updated_at"])
+    user.refresh_from_db(using=write_db, fields=[field, "updated_at"])
     return advanced
 
 

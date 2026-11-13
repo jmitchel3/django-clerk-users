@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 
 from django_clerk_users.webhooks import handlers
 from django_clerk_users.webhooks.handlers import (
@@ -168,3 +169,88 @@ def test_advance_helper_with_stale_instance(user):
     assert _advance_activity_timestamp(stale, "last_login", OLDER) is False
     assert stale.last_login == NEWER
     assert stored("last_login") == NEWER
+
+
+class ActivityShardRouter:
+    """Reads select a shard; writes use Django's instance-database fallback."""
+
+    def db_for_read(self, model, **hints):
+        if model is get_user_model():
+            return "activity_primary"
+        return None
+
+
+class ActivityReplicaRouter:
+    """A loaded user supplies the context needed to select its primary."""
+
+    def db_for_read(self, model, **hints):
+        if model is get_user_model():
+            return "activity_replica"
+        return None
+
+    def db_for_write(self, model, **hints):
+        if model is get_user_model() and hints.get("instance") is not None:
+            return "activity_primary"
+        return None
+
+
+@pytest.mark.django_db(databases=["default", "activity_primary", "activity_replica"])
+@pytest.mark.parametrize("deliver,field", CASES)
+class TestActivityDatabaseRouting:
+    def test_shard_update_does_not_touch_same_pk_on_default(self, deliver, field):
+        User = get_user_model()
+        unrelated = User.objects.db_manager("default").create_user(
+            pk=42, clerk_id="user_other", email="other@example.com", **{field: OLDER}
+        )
+        target = User.objects.db_manager("activity_primary").create_user(
+            pk=42, clerk_id=CLERK_ID, email="activity@example.com"
+        )
+
+        with override_settings(DATABASE_ROUTERS=[ActivityShardRouter()]):
+            assert deliver(ms(NEWER)) is True
+
+        unrelated.refresh_from_db(using="default")
+        target.refresh_from_db(using="activity_primary")
+        assert getattr(unrelated, field) == OLDER
+        assert getattr(target, field) == NEWER
+
+    def test_primary_write_and_refresh_bypass_stale_replica(self, deliver, field):
+        User = get_user_model()
+        unrelated = User.objects.db_manager("default").create_user(
+            pk=42, clerk_id="user_other", email="other@example.com", **{field: OLDER}
+        )
+        for alias in ("activity_primary", "activity_replica"):
+            User.objects.db_manager(alias).create_user(
+                pk=42,
+                clerk_id=CLERK_ID,
+                email="activity@example.com",
+                **{field: OLDER},
+            )
+        seen = []
+        signal = clerk_session_created if field == "last_login" else clerk_session_ended
+
+        def receiver(sender, user, activity_advanced, **kwargs):
+            seen.append((getattr(user, field), activity_advanced, user._state.db))
+
+        signal.connect(receiver)
+        try:
+            with override_settings(DATABASE_ROUTERS=[ActivityReplicaRouter()]):
+                assert deliver(ms(NEWER)) is True
+                assert deliver(ms(OLDER)) is True
+        finally:
+            signal.disconnect(receiver)
+
+        unrelated.refresh_from_db(using="default")
+        assert getattr(unrelated, field) == OLDER
+        assert (
+            User.objects.using("activity_primary").values_list(field, flat=True).get()
+            == NEWER
+        )
+        assert (
+            User.objects.using("activity_replica").values_list(field, flat=True).get()
+            == OLDER
+        )
+        assert seen == [
+            (NEWER, True, "activity_primary"),
+            (NEWER, False, "activity_primary"),
+        ]
