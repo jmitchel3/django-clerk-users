@@ -28,6 +28,7 @@ jobs:
         cache-dependency-glob: uv.lock
 
     - name: Install dependencies
+      timeout-minutes: 5
       run: uv sync --group dev --frozen
 
     - name: Check lockfile
@@ -37,21 +38,26 @@ jobs:
       run: uv run python -m pip check
 
     - name: Build package
+      timeout-minutes: 5
       run: uv build
 
     - name: Check distribution artifacts
       run: uv run python scripts/check_dist.py
 
     - name: Install built wheel
+      timeout-minutes: 5
       run: uv run --no-sync python -m pip install --force-reinstall --no-deps dist/django_clerk_users-*.whl
 
     - name: Smoke test installed wheel
+      timeout-minutes: 5
       run: uv run --no-sync python scripts/smoke_installed_wheel.py
 
     - name: Live Clerk smoke test
+      timeout-minutes: 5
       env:
         CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
         CLERK_WEBHOOK_SIGNING_KEY: ${{ secrets.CLERK_WEBHOOK_SIGNING_KEY }}
-        CLERK_FRONTEND_HOSTS: ${{ vars.CLERK_FRONTEND_HOSTS }}
-        CLERK_LIVE_SMOKE_LOOKUP_EMAIL: ${{ inputs.lookup_email || vars.CLERK_LIVE_SMOKE_LOOKUP_EMAIL }}
+        # Doppler syncs settings as repository secrets; GitHub variables still work.
+        CLERK_FRONTEND_HOSTS: ${{ secrets.CLERK_FRONTEND_HOSTS || vars.CLERK_FRONTEND_HOSTS }}
+        CLERK_LIVE_SMOKE_LOOKUP_EMAIL: ${{ inputs.lookup_email || secrets.CLERK_LIVE_SMOKE_LOOKUP_EMAIL || vars.CLERK_LIVE_SMOKE_LOOKUP_EMAIL }}
       run: uv run --no-sync python scripts/live_clerk_smoke.py
