@@ -182,6 +182,11 @@ def _check_sdist(version: str) -> None:
         f"{prefix}CHANGELOG.md",
         f"{prefix}LICENSE",
         f"{prefix}README.md",
+        # Bundled recipe tests load these files, including during collection.
+        f"{prefix}docs/recipes/clerk_user_schema.sql",
+        f"{prefix}docs/recipes/hybrid-auth.md",
+        f"{prefix}docs/recipes/hybrid_auth_authentication.py",
+        f"{prefix}docs/recipes/vendored-migrations.md",
         f"{prefix}pyproject.toml",
         f"{prefix}scripts/check_cryptography_ceiling.py",
         f"{prefix}scripts/check_dist.py",
@@ -195,10 +200,12 @@ def _check_sdist(version: str) -> None:
         f"{prefix}src/django_clerk_users/py.typed",
         f"{prefix}tests/test_checks.py",
         f"{prefix}tests/test_admin.py",
+        f"{prefix}tests/test_drf_hybrid_recipe.py",
         f"{prefix}tests/test_live_clerk_smoke.py",
         f"{prefix}tests/test_migrations.py",
         f"{prefix}tests/test_organization_webhooks.py",
         f"{prefix}tests/test_release_scripts.py",
+        f"{prefix}tests/test_vendored_migration_upgrade.py",
     }
 
     with tarfile.open(sdist) as archive:
