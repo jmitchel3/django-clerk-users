@@ -2,6 +2,26 @@
 
 All notable changes to `django-clerk-users` are documented here.
 
+## 0.5.1 - 2026-11-13
+
+### Fixed
+
+- **Session activity updates honor database routing.**
+  ([#44](https://github.com/jmitchel3/django-clerk-users/issues/44))
+  `last_login` and `last_logout` updates use the write database selected with
+  the user instance, then refresh from that same database. This prevents
+  updates to an unrelated user with the same primary key in another database
+  and stale timestamps in lifecycle signals when reads use a replica.
+- **Source distributions include recipe test dependencies.**
+  ([#45](https://github.com/jmitchel3/django-clerk-users/issues/45))
+  The bundled tests can now be collected from the published source archive.
+  Distribution checks enforce the presence of the required recipe assets.
+- **The strict hybrid authentication recipe rejects blank Authorization
+  headers.** ([#46](https://github.com/jmitchel3/django-clerk-users/issues/46))
+  Empty or whitespace-only headers now fail authentication instead of falling
+  back to a Django session cookie. Requests without an Authorization header
+  still use session authentication with CSRF enforcement.
+
 ## 0.5.0 - 2026-11-12
 
 ### Changed
