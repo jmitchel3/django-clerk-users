@@ -80,6 +80,7 @@ include = [
   "/LICENSE",
   "/NOTICE",
   "/README.md",
+  "/docs/recipes",
   "/pyproject.toml",
   "/scripts",
   "/src",
