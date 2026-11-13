@@ -180,6 +180,19 @@ def test_strict_malformed_credentials_fail(header, cookie_client):
     assert response["WWW-Authenticate"] == "Bearer"
 
 
+@pytest.mark.parametrize("header", ["", " ", " \t "])
+@pytest.mark.parametrize("method", ["get", "post"])
+def test_strict_empty_authorization_never_uses_session(header, method, cookie_client):
+    headers = {"HTTP_AUTHORIZATION": header}
+    if method == "post":
+        headers["HTTP_X_CSRFTOKEN"] = csrf_token(cookie_client)
+
+    response = getattr(cookie_client, method)("/strict/", **headers)
+
+    assert response.status_code == 401
+    assert response["WWW-Authenticate"] == "Bearer"
+
+
 def test_default_non_bearer_scheme_falls_back_to_session(cookie_client):
     """DRF's normal multi-scheme behavior, for contrast with the strict class."""
     response = cookie_client.get("/default/", HTTP_AUTHORIZATION="Basic dXNlcjpwYXNz")

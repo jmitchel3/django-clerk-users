@@ -38,9 +38,10 @@ class StrictClerkSessionAuthentication(BaseAuthentication):
 
     - No Authorization header: Django session with CSRF enforced.
     - ``Authorization: Bearer <token>``: Clerk only. Invalid tokens fail.
-    - Any other Authorization value, an empty Bearer token, or Clerk not
-      configured: authentication fails. The request never falls through to the
-      session cookie or to a later authenticator.
+    - Any other Authorization value (including an empty or whitespace-only
+      header), an empty Bearer token, or Clerk not configured: authentication
+      fails. The request never falls through to the session cookie or to a
+      later authenticator.
 
     List it as the only entry in ``DEFAULT_AUTHENTICATION_CLASSES``; any class
     listed after it would only see requests that carried no credentials.
@@ -54,7 +55,7 @@ class StrictClerkSessionAuthentication(BaseAuthentication):
         self.session = self.session_authentication_class()
 
     def authenticate(self, request):
-        if not request.headers.get("authorization", "").strip():
+        if "authorization" not in request.headers:
             return self.session.authenticate(request)
 
         if get_bearer_token(request) is None:
